@@ -104,7 +104,9 @@ const CONTENT_BLOCK_SELECTOR = [
   "dialog"
 ].join(", ");
 
-/** 호버로 읽어주는 인터랙티브 요소 */
+/** 호버 시 우선해서 읽는 인터랙티브 요소. 여기에 안 걸리는 일반 본문은 findSpeakableBlock으로
+ * 가장 가까운 내용 블록을 찾아 읽는다(클릭과 같은 기준) — 카드가 통째로 링크인 목록 화면만
+ * 호버로 읽히고 상세 화면 본문은 안 읽히던 문제를 없애기 위해서다. */
 export const HOVER_SPEAK_SELECTOR =
   "button, a, [role='button'], [role='link'], input, textarea, select";
 
@@ -122,7 +124,7 @@ export function shouldStopHoverSpeech(relatedTarget: EventTarget | null): boolea
     return true;
   }
 
-  const el = relatedTarget as Element;
+  const el = resolveSpeechTarget(relatedTarget as Element);
   if (isA11yChrome(el)) return true;
   if (el.closest(HOVER_SPEAK_SELECTOR)) return false;
   if (findSpeakableBlock(el)) return false;
@@ -146,8 +148,24 @@ export function isA11yChrome(element: Element): boolean {
   return Boolean(element.closest(CHROME_SELECTOR));
 }
 
+/**
+ * 마우스/클릭 이벤트의 실제 target이 aria-hidden 요소 자체(또는 그 안)일 수 있다 — 예:
+ * "별점 4.5점" 배지처럼 아이콘·숫자는 읽기 중복을 막으려고 aria-hidden 처리했는데, 이용자는
+ * 보통 그 아이콘이나 숫자 위에 마우스를 올리거나 클릭한다. 그 target을 그대로 isA11yChrome에
+ * 넘기면 "무시해야 할 chrome 요소"로 오판해 부모의 호버/클릭 읽기 자체가 죽어버린다. aria-hidden
+ * 조상을 벗어난 첫 요소까지 거슬러 올라가 그걸 기준으로 판단하도록 보정한다.
+ */
+export function resolveSpeechTarget(target: Element): Element {
+  let current = target;
+  while (current.getAttribute("aria-hidden") === "true" && current.parentElement) {
+    current = current.parentElement;
+  }
+  return current;
+}
+
 /** 눌러서 읽을 가장 가까운 내용 블록. main/body처럼 너무 큰 컨테이너는 고르지 않는다. */
-export function findSpeakableBlock(start: Element): Element | null {
+export function findSpeakableBlock(rawStart: Element): Element | null {
+  const start = resolveSpeechTarget(rawStart);
   if (isA11yChrome(start)) return null;
 
   const explicit = start.closest("[data-speakable]");
@@ -224,6 +242,70 @@ export function findNextSpeakableBlock(from: Element): Element | null {
   return null;
 }
 
+// 카드/섹션은 본문 전체를 읽는데, element.textContent를 그대로 쓰면 두 가지 문제가 있다.
+//  1) aria-hidden/aria-label을 전혀 모른다 — 화면에만 보이라고 숨겨둔 값까지 그대로 읽는다.
+//  2) 인접한 요소의 텍스트를 구분자 없이 이어붙인다 — 그래서 제목 "코스 2-1" 바로 뒤에 별점
+//     "4.5"가 오면 "2-14.5"가 되어 "코스2 마이너스 14.5"처럼 하나의 수로 읽혔다.
+// 그래서 직접 트리를 훑으면서, aria-hidden 하위 트리는 건너뛰고 aria-label이 있는 요소는 그
+// 라벨로 대체하며, 조각 사이에 구분자를 넣어 문장을 만든다(표준 접근성 트리와 같은 원리).
+// 제목·라벨처럼 그 자체로 완결된 조각 뒤에는 쉼표를 넣어 TTS가 끊어 읽게 한다.
+type SpeakPart = { text: string; standalone: boolean };
+
+const STANDALONE_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
+
+function collectSpeakParts(element: Element, parts: SpeakPart[]): void {
+  // 붙어 있는 텍스트 노드는 원문 그대로 이어 붙였다가 한 조각으로 만든다 — React가
+  // `{count}곳`을 텍스트 노드 둘로 쪼개도 "1 곳"이 아니라 "1곳"으로 읽히게 하기 위해서다.
+  let textBuffer = "";
+  const flushText = () => {
+    const text = normalizeSpeakText(textBuffer);
+    textBuffer = "";
+    if (text) parts.push({ text, standalone: false });
+  };
+
+  for (const child of Array.from(element.childNodes)) {
+    if (child.nodeType === 3) {
+      textBuffer += child.textContent ?? "";
+      continue;
+    }
+    if (child.nodeType !== 1) continue;
+
+    flushText();
+    const childElement = child as Element;
+    if (childElement.getAttribute("aria-hidden") === "true") continue;
+
+    const label = childElement.getAttribute("aria-label")?.trim();
+    if (label) {
+      parts.push({ text: label, standalone: true });
+      continue;
+    }
+
+    const before = parts.length;
+    collectSpeakParts(childElement, parts);
+
+    // 제목 태그는 뒤에 오는 내용과 붙지 않도록 하나의 완결된 조각으로 표시한다.
+    if (STANDALONE_TAGS.has(childElement.tagName.toLowerCase()) && parts.length > before) {
+      parts[parts.length - 1] = { text: parts[parts.length - 1].text, standalone: true };
+    }
+  }
+  flushText();
+}
+
+function extractSpeakableBody(element: Element): string {
+  // 테스트 목 객체처럼 childNodes가 없는 환경에서는 textContent로 폴백한다.
+  if (!element.childNodes) return element.textContent ?? "";
+
+  const parts: SpeakPart[] = [];
+  collectSpeakParts(element, parts);
+  if (!parts.length) return element.textContent ?? "";
+
+  return parts.reduce((sentence, part, index) => {
+    if (index === 0) return part.text;
+    const separator = part.standalone || parts[index - 1].standalone ? ", " : " ";
+    return sentence + separator + part.text;
+  }, "");
+}
+
 function labelledByText(element: Element): string {
   const labelledBy = element.getAttribute("aria-labelledby");
   if (!labelledBy) return "";
@@ -247,7 +329,10 @@ export function getSpeakableText(element: Element): string | null {
       ? ((element as HTMLInputElement).type || element.getAttribute("type") || "text").toLowerCase()
       : "";
   const isTextInput =
-    tag === "input" && ["text", "search", "email", "tel", "url", "number"].includes(inputType);
+    tag === "input" &&
+    ["text", "search", "email", "tel", "url", "number", "date", "time", "month", "week"].includes(
+      inputType
+    );
 
   if (isTextarea || isTextInput || inputType === "password") {
     const input = element as HTMLInputElement | HTMLTextAreaElement;
@@ -258,6 +343,16 @@ export function getSpeakableText(element: Element): string | null {
   }
 
   if (tag === "input" && ariaLabel) return ariaLabel;
+
+  // <select>는 옵션 전체(예: 0시~23시 24개)가 자식 텍스트라, 그대로 body를 뽑으면 목록 전체를
+  // 처음부터 다 읽어버린다. 실제로 의미 있는 건 "지금 선택된 값" 하나뿐이다.
+  if (tag === "select") {
+    const select = element as HTMLSelectElement;
+    const selected = select.selectedOptions?.[0] ?? select.options?.[select.selectedIndex];
+    const selectedText = normalizeSpeakText(selected?.textContent);
+    const parts = [ariaLabel, selectedText].filter((part): part is string => Boolean(part));
+    return parts.length ? parts.join(", ").slice(0, 200) : null;
+  }
 
   // 짧은 컨트롤은 aria-label만. 섹션/카드는 본문까지.
   const isCompactControl =
@@ -272,7 +367,7 @@ export function getSpeakableText(element: Element): string | null {
   if (ariaLabel && isCompactControl) return ariaLabel;
 
   const label = labelledByText(element);
-  const body = normalizeSpeakText(element.textContent);
+  const body = normalizeSpeakText(extractSpeakableBody(element));
   if (label) {
     const withoutRepeatedLabel = body.startsWith(label) ? body.slice(label.length).trim() : body;
     const combined = withoutRepeatedLabel ? `${label}. ${withoutRepeatedLabel}` : label;

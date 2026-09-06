@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test, { afterEach } from "node:test";
+import { JSDOM } from "jsdom";
 import {
   A11Y_STORAGE_KEY,
   applyAccessibilityState,
@@ -12,6 +13,7 @@ import {
   findNextSpeakableBlock,
   findSpeakableBlock,
   getSpeakableText,
+  resolveSpeechTarget,
   shouldStopHoverSpeech,
   type AccessibilityState
 } from "./accessibility.ts";
@@ -227,6 +229,26 @@ test("비밀번호와 선택 입력은 민감하거나 무의미한 value를 읽
   assert.equal(getSpeakableText(checkbox), "답변 자동 읽기");
 });
 
+test("select는 옵션 전체가 아니라 현재 선택된 값만 읽는다", () => {
+  // 실제 버그 재현: 시간 select(0시~23시 24개 option)에 마우스를 올리면 element.textContent가
+  // 그대로 쓰여 24개 옵션이 전부 이어 읽혔다. 실제로 의미 있는 건 선택된 값 하나뿐이다.
+  const dom = new JSDOM(
+    `<select aria-label="시작 시각">
+       <option value="8">8시</option>
+       <option value="9" selected>9시</option>
+       <option value="10">10시</option>
+     </select>`
+  );
+  const select = dom.window.document.querySelector("select");
+  if (!select) throw new Error("test fixture missing <select>");
+
+  const text = getSpeakableText(select);
+
+  assert.equal(text, "시작 시각, 9시");
+  assert.ok(!text?.includes("8시"));
+  assert.ok(!text?.includes("10시"));
+});
+
 test("aria-labelledby가 있으면 제목과 본문을 함께 읽는다", () => {
   const title = { textContent: "방문 정보" };
   const section = {
@@ -252,6 +274,60 @@ test("aria-labelledby가 있으면 제목과 본문을 함께 읽는다", () => 
   };
 
   assert.equal(getSpeakableText(section), "방문 정보. 운영시간 09:00-18:00 휴무일 매주 월요일");
+});
+
+test("카드 안 aria-hidden 숫자는 제목 끝자리와 붙지 않고, aria-label로 분리돼 읽힌다", () => {
+  // 실제 버그 재현: 코스 제목이 "코스 2-1"처럼 숫자로 끝나고 바로 옆에 별점 배지가 있으면,
+  // element.textContent를 그대로 읽던 예전 방식은 "코스 2-1" + "4.5"가 붙어
+  // "코스2 마이너스 14.5"처럼 읽혔다. aria-hidden 하위 트리를 빼고 aria-label로 대체해야 한다.
+  const dom = new JSDOM(
+    `<a href="/course/1">
+       <h3>코스 2-1</h3>
+       <div aria-label="별점 4.5점">
+         <svg aria-hidden="true"></svg>
+         <span aria-hidden="true">4.5</span>
+       </div>
+       <div aria-label="좋아요 12개">
+         <svg aria-hidden="true"></svg>
+         <span aria-hidden="true">12</span>
+       </div>
+     </a>`
+  );
+  const link = dom.window.document.querySelector("a");
+  if (!link) throw new Error("test fixture missing <a>");
+
+  const text = getSpeakableText(link);
+
+  assert.ok(text?.includes("코스 2-1"));
+  assert.ok(text?.includes("별점 4.5점"));
+  assert.ok(text?.includes("좋아요 12개"));
+  // 숫자 "4.5"와 "12"가 원본 그대로 노출돼 다른 숫자와 붙는 일이 없어야 한다.
+  assert.ok(!text?.includes("4.512"));
+  assert.ok(!text?.includes("1 4.5"));
+});
+
+test("aria-hidden 아이콘/숫자 위에서 호버·클릭해도 부모 배지를 chrome으로 오판하지 않는다", () => {
+  // 실제 버그 재현: 별점 배지 안 아이콘·숫자에 aria-hidden="true"를 붙였더니, 이용자가 그
+  // 아이콘이나 숫자 위에 마우스를 올리거나 클릭하면 이벤트의 target이 그 aria-hidden 요소가
+  // 돼서, isA11yChrome(target)이 true로 오판해 부모 배지(data-speakable)의 읽기 자체가
+  // 죽어버렸다. resolveSpeechTarget으로 숨김 조상을 벗어난 지점부터 판단해야 한다.
+  const dom = new JSDOM(
+    `<div data-speakable aria-label="별점 4.5점">
+       <svg aria-hidden="true"></svg>
+       <span aria-hidden="true">4.5</span>
+     </div>`
+  );
+  const hiddenNumber = dom.window.document.querySelector("span[aria-hidden]");
+  if (!hiddenNumber) throw new Error("test fixture missing hidden span");
+  const badge = hiddenNumber.parentElement;
+  if (!badge) throw new Error("test fixture missing badge div");
+
+  const resolved = resolveSpeechTarget(hiddenNumber);
+  assert.equal(resolved, badge);
+
+  const block = findSpeakableBlock(hiddenNumber);
+  assert.equal(block, badge);
+  assert.equal(getSpeakableText(block ?? hiddenNumber), "별점 4.5점");
 });
 
 test("내용 블록은 고르지만 main과 chrome은 고르지 않는다", () => {

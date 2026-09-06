@@ -24,6 +24,7 @@ import {
   isA11yChrome,
   loadAccessibilityState,
   mergeAccessibilityPreferences,
+  resolveSpeechTarget,
   saveAccessibilityState,
   shouldStopHoverSpeech,
   type AccessibilityState
@@ -181,26 +182,37 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
     };
 
     const handleFocusIn = (event: FocusEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element) || isA11yChrome(target)) return;
+      const raw = event.target;
+      if (!(raw instanceof Element)) return;
+      // aria-hidden 아이콘/숫자(예: 별점 배지 안) 위가 실제 이벤트 target일 수 있다 — 그걸
+      // 그대로 chrome 판정에 넘기면 정작 부모 배지의 읽기 자체가 죽는다. 숨김 조상을
+      // 벗어난 지점부터 판단한다.
+      const target = resolveSpeechTarget(raw);
+      if (isA11yChrome(target)) return;
 
       const block = findSpeakableBlock(target) ?? target;
       if (speakBlock(block)) speakSourceRef.current = "other";
     };
 
     const handleMouseOver = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element) || isA11yChrome(target)) return;
+      const raw = event.target;
+      if (!(raw instanceof Element)) return;
+      const target = resolveSpeechTarget(raw);
+      if (isA11yChrome(target)) return;
 
-      const interactive = target.closest(HOVER_SPEAK_SELECTOR);
-      if (!interactive) return;
+      // 버튼·링크가 있으면 그걸 우선하고(목록은 카드 전체가 링크), 없으면 클릭과 같은 기준으로
+      // 가장 가까운 내용 블록을 읽는다 — 상세 화면처럼 본문이 일반 텍스트인 곳도 호버로 읽히게.
+      const block = target.closest(HOVER_SPEAK_SELECTOR) ?? findSpeakableBlock(target);
+      if (!block) return;
 
-      if (speakBlock(interactive)) speakSourceRef.current = "hover";
+      if (speakBlock(block)) speakSourceRef.current = "hover";
     };
 
     const handleClick = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element) || isA11yChrome(target)) return;
+      const raw = event.target;
+      if (!(raw instanceof Element)) return;
+      const target = resolveSpeechTarget(raw);
+      if (isA11yChrome(target)) return;
 
       // 접근성 패널의 「다음 내용 읽기」는 클릭 읽기 대상에서 제외
       if (target.closest("[data-a11y-speak-next]")) return;
