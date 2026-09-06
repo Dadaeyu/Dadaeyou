@@ -30,7 +30,6 @@ import {
   ShieldCheck,
   User,
   RotateCcw,
-  Calendar,
   Navigation,
   Footprints,
   Car,
@@ -132,10 +131,35 @@ interface MyCourse {
 // <select> 시각 옵션(0~23시)
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, h) => h);
 
-// DB timestamptz("2026-08-03T00:00:00+00:00") 든 "YYYY-MM-DD" 든 날짜 부분만 뽑아 보여준다.
-function formatDateOnly(value?: string | null): string {
-  if (!value) return "-";
-  return value.slice(0, 10);
+// 화면 읽기가 "1번째"를 숫자 그대로 읽으면 "한번째"처럼 어색하게 나온다(한국어 서수는
+// "첫 번째"처럼 고유어를 써야 자연스럽다). 장소 목록은 보통 한 Day에 몇 곳 안 되므로 20번째까지만
+// 고유어로 두고, 그 이상은 자연스러운 표현이 마땅치 않아 숫자로 대체한다.
+const KOREAN_ORDINAL_PREFIXES = [
+  "첫",
+  "두",
+  "세",
+  "네",
+  "다섯",
+  "여섯",
+  "일곱",
+  "여덟",
+  "아홉",
+  "열",
+  "열한",
+  "열두",
+  "열세",
+  "열네",
+  "열다섯",
+  "열여섯",
+  "열일곱",
+  "열여덟",
+  "열아홉",
+  "스무"
+];
+
+function koreanOrdinal(n: number): string {
+  const prefix = KOREAN_ORDINAL_PREFIXES[n - 1];
+  return prefix ? `${prefix} 번째` : `${n}번째`;
 }
 import { Card } from "../ui/Card";
 import { Badge } from "../ui/Badge";
@@ -329,6 +353,10 @@ interface RecommendedCourseDraft {
   summary: string;
   placeCount: number;
   hashtags: string[];
+  // 추천 요청 시 선택한 여행 기간 — API 응답 자체엔 없어서, 요청에 쓴 filters.dateFrom/dateTo를
+  // 그대로 붙여 미리보기/저장에 쓴다(실제 코스 저장이 없는 미리보기 단계라 서버가 몰라도 된다).
+  startDate?: string;
+  endDate?: string;
   days: RecommendedCourseDay[];
 }
 
@@ -859,6 +887,25 @@ export default function Course() {
     limit: number;
   } | null>(null);
 
+  // 배너가 처음 뜰 때부터(추천받기 누르기 전부터) 오늘 사용 현황을 보여준다 — 로그인해야
+  // 실제로 추천을 받을 수 있으니, 로그인했을 때만 조회한다(비로그인은 어차피 눌러도
+  // requireLoginOrRedirect로 막혀 의미가 없다).
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    fetch("/api/courses/recommend")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { usage?: { used: number; remaining: number; limit: number } } | null) => {
+        if (alive && json?.usage) setRecommendUsage(json.usage);
+      })
+      .catch(() => {
+        // 조회 실패해도 배너 자체는 기본 문구(하루 3회)로 정상 표시되니 조용히 무시한다.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [user]);
+
   // 필터/결과가 바뀔 때마다 세션에 동기화 — 상세 화면(id 있음)에서는 건드리지 않는다.
   useEffect(() => {
     if (id) return;
@@ -917,7 +964,13 @@ export default function Course() {
         setRecommendError(json.error ?? "코스를 추천받지 못했어요. 잠시 뒤 다시 시도해 주세요.");
         return;
       }
-      const courses = json.courses ?? [];
+      // 응답엔 기간이 없으니, 요청에 실었던 dateFrom/dateTo를 그대로 각 카드에 붙여둔다 —
+      // 미리보기 상세에 "기간"으로 보여주고, "내 코스에 추가" 시 그대로 저장하기 위해서다.
+      const courses = (json.courses ?? []).map((course) => ({
+        ...course,
+        startDate: filters.dateFrom || undefined,
+        endDate: filters.dateTo || undefined
+      }));
       setRecommendCourses(courses);
       setRecommendNotice(
         courses.length === 0 ? (json.message ?? "조건에 맞는 코스를 찾지 못했어요.") : ""
@@ -1195,15 +1248,24 @@ export default function Course() {
                         <h3 className="text-ink truncate font-semibold">{course.course_nm}</h3>
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
-                        <div className="flex items-center gap-1">
-                          <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                          <span className="text-sm font-semibold text-gray-800">
+                        <div
+                          className="flex items-center gap-1"
+                          aria-label={`별점 ${course.average_rating.toFixed(1)}점`}
+                        >
+                          <Star
+                            className="h-4 w-4 fill-yellow-400 text-yellow-400"
+                            aria-hidden="true"
+                          />
+                          <span className="text-sm font-semibold text-gray-800" aria-hidden="true">
                             {course.average_rating.toFixed(1)}
                           </span>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <Heart className="h-4 w-4 fill-red-400 text-red-400" />
-                          <span className="text-sm font-semibold text-gray-800">
+                        <div
+                          className="flex items-center gap-1"
+                          aria-label={`즐겨찾기 ${course.like_count}개`}
+                        >
+                          <Heart className="h-4 w-4 fill-red-400 text-red-400" aria-hidden="true" />
+                          <span className="text-sm font-semibold text-gray-800" aria-hidden="true">
                             {course.like_count}
                           </span>
                         </div>
@@ -1582,15 +1644,24 @@ export default function Course() {
                         </Badge>
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
-                        <div className="flex items-center gap-1">
-                          <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                          <span className="text-sm font-semibold text-gray-800">
+                        <div
+                          className="flex items-center gap-1"
+                          aria-label={`별점 ${(courseRatings[course.course_id] ?? 0).toFixed(1)}점`}
+                        >
+                          <Star
+                            className="h-4 w-4 fill-yellow-400 text-yellow-400"
+                            aria-hidden="true"
+                          />
+                          <span className="text-sm font-semibold text-gray-800" aria-hidden="true">
                             {(courseRatings[course.course_id] ?? 0).toFixed(1)}
                           </span>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <Heart className="h-4 w-4 fill-red-400 text-red-400" />
-                          <span className="text-sm font-semibold text-gray-800">
+                        <div
+                          className="flex items-center gap-1"
+                          aria-label={`즐겨찾기 ${courseLikeCounts[course.course_id] ?? 0}개`}
+                        >
+                          <Heart className="h-4 w-4 fill-red-400 text-red-400" aria-hidden="true" />
+                          <span className="text-sm font-semibold text-gray-800" aria-hidden="true">
                             {courseLikeCounts[course.course_id] ?? 0}
                           </span>
                         </div>
@@ -1937,6 +2008,8 @@ function CourseDetail({ id }: { id: string }) {
       rating: 0,
       likes: 0,
       tags: [],
+      startDate: draft.startDate,
+      endDate: draft.endDate,
       days: draft.days.map((day) => ({
         day: day.day,
         places: day.places.map((place, index) => ({
@@ -1953,6 +2026,13 @@ function CourseDetail({ id }: { id: string }) {
       }))
     });
     setCourseBadges(draft.hashtags.map((label) => ({ label, count: 0 })));
+    // 목록 카드(1421번째 줄 근처)와 같은 표기 — 만든 주체는 나 자신이 아니라 다유 AI다.
+    setCourseAuthor({
+      nickname: "다유 AI",
+      role: "admin",
+      registDate: new Date().toISOString().slice(0, 10),
+      updateDate: null
+    });
     setDbCourseLoading(false);
   }, [isAiPreview]);
 
@@ -2907,8 +2987,18 @@ function CourseDetail({ id }: { id: string }) {
         ) : isEditing ? (
           /* ── 편집 패널 ── */
           <>
-            {/* Edit header — 코스 상세 패널과 동일한 스타일(제목만, 버튼은 하단 Actions로) */}
+            {/* Edit header — 코스 상세 패널과 동일한 스타일(뒤로가기 + 제목, 나머지 버튼은 하단
+                Actions로). 뒤로가기는 하단 "취소" 버튼과 같은 handleCancel을 그대로 쓴다(신규는
+                목록으로, 기존은 저장값으로 복원하며 편집 모드만 빠져나감) — 저장하지 않은 변경
+                사항 확인(confirm)도 그대로 따라온다. */}
             <div className="border-hairline flex shrink-0 items-center gap-2 border-b px-3 py-2.5">
+              <button
+                onClick={handleCancel}
+                className="rounded-lg p-1.5 text-gray-600 transition-colors hover:bg-gray-100"
+                aria-label="뒤로가기"
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              </button>
               <h2 className="flex-1 truncate text-sm font-bold text-gray-800">
                 {isNew ? "코스 추가" : "코스 편집"}
               </h2>
@@ -2962,6 +3052,10 @@ function CourseDetail({ id }: { id: string }) {
                     value={editStartDate}
                     max={editEndDate || undefined}
                     onChange={(e) => handleStartDateChange(e.target.value)}
+                    // 브라우저 기본은 달력 아이콘을 눌러야만 picker가 뜨는 경우가 있다 —
+                    // 입력창 아무 곳을 눌러도 열리게 한다(미지원 브라우저는 조용히 무시).
+                    onClick={(e) => e.currentTarget.showPicker?.()}
+                    aria-label="시작일"
                     className="focus:ring-brand-500 border-hairline text-slate min-w-0 flex-1 rounded-lg border px-2 py-2 text-xs focus:ring-2 focus:outline-none"
                   />
                   <span className="text-stone shrink-0 text-xs">~</span>
@@ -2970,6 +3064,8 @@ function CourseDetail({ id }: { id: string }) {
                     value={editEndDate}
                     min={editStartDate || undefined}
                     onChange={(e) => handleEndDateChange(e.target.value)}
+                    onClick={(e) => e.currentTarget.showPicker?.()}
+                    aria-label="종료일"
                     className="focus:ring-brand-500 border-hairline text-slate min-w-0 flex-1 rounded-lg border px-2 py-2 text-xs focus:ring-2 focus:outline-none"
                   />
                 </div>
@@ -3065,7 +3161,7 @@ function CourseDetail({ id }: { id: string }) {
                           aria-label="위로 이동"
                           className="hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 rounded-md border border-gray-300 bg-white p-0.5 text-gray-600 shadow-sm transition-colors disabled:opacity-30 disabled:shadow-none disabled:hover:border-gray-300 disabled:hover:bg-white disabled:hover:text-gray-600"
                         >
-                          <ChevronUp className="h-3 w-3" />
+                          <ChevronUp className="h-3 w-3" aria-hidden="true" />
                         </button>
                         <button
                           disabled={idx === arr.length - 1}
@@ -3082,13 +3178,15 @@ function CourseDetail({ id }: { id: string }) {
                           aria-label="아래로 이동"
                           className="hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 rounded-md border border-gray-300 bg-white p-0.5 text-gray-600 shadow-sm transition-colors disabled:opacity-30 disabled:shadow-none disabled:hover:border-gray-300 disabled:hover:bg-white disabled:hover:text-gray-600"
                         >
-                          <ChevronDown className="h-3 w-3" />
+                          <ChevronDown className="h-3 w-3" aria-hidden="true" />
                         </button>
                       </div>
                       {/* Number badge */}
                       <div
                         className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
                         style={{ background: getCategoryColor(place.categoryCode) }}
+                        data-speakable
+                        aria-label={`${koreanOrdinal(idx + 1)} 장소`}
                       >
                         {idx + 1}
                       </div>
@@ -3098,6 +3196,7 @@ function CourseDetail({ id }: { id: string }) {
                         <div className="mt-0.5 flex items-center gap-1">
                           <select
                             value={place.startHour}
+                            aria-label={`${place.name} 시작 시각`}
                             onChange={(e) =>
                               setEditDays(
                                 editDays.map((d) => {
@@ -3120,6 +3219,7 @@ function CourseDetail({ id }: { id: string }) {
                           <span className="text-[10px] text-gray-400">~</span>
                           <select
                             value={place.endHour}
+                            aria-label={`${place.name} 종료 시각`}
                             onChange={(e) =>
                               setEditDays(
                                 editDays.map((d) => {
@@ -3204,9 +3304,10 @@ function CourseDetail({ id }: { id: string }) {
                   const saved = readCourseListReturn();
                   router.push(saved ? `/course?tab=${saved.tab}` : "/course");
                 }}
+                aria-label="뒤로가기"
                 className="rounded-lg p-1.5 text-gray-600 transition-colors hover:bg-gray-100"
               >
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
               </button>
               <h2 className="flex-1 truncate text-sm font-bold text-gray-800">
                 {courseData.title}
@@ -3218,7 +3319,7 @@ function CourseDetail({ id }: { id: string }) {
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
               {/* 등록자 */}
               {!isNew && courseAuthor && (
-                <div className="border-hairline border-b px-4 py-3">
+                <div className="border-hairline border-b px-4 py-3" data-speakable>
                   <p className="mb-1.5 text-xs font-semibold text-gray-700">등록자</p>
                   <CourseAuthorRow
                     authorType={courseAuthor.role}
@@ -3228,8 +3329,9 @@ function CourseDetail({ id }: { id: string }) {
                 </div>
               )}
 
-              {/* 등록일 / 수정일 — 한 줄을 반으로 나눠 값 있는 것만 표시 */}
-              {!isNew && courseAuthor && (
+              {/* 등록일 / 수정일 — 아직 저장 전인 AI 미리보기는 등록일이 실제로 없으니 숨긴다.
+                  한 줄을 반으로 나눠 값 있는 것만 표시 */}
+              {!isNew && !isAiPreview && courseAuthor && (
                 <div className="border-hairline flex border-b px-4 py-3">
                   <div className="flex-1">
                     <p className="mb-1.5 text-xs font-semibold text-gray-700">등록일</p>
@@ -3246,7 +3348,7 @@ function CourseDetail({ id }: { id: string }) {
 
               {/* 해시태그 — 포함된 장소들의 대분류+접근성 종합 상위 3개 */}
               {courseBadges.length > 0 && (
-                <div className="border-hairline border-b px-4 py-3">
+                <div className="border-hairline border-b px-4 py-3" data-speakable>
                   <p className="mb-1.5 text-xs font-semibold text-gray-700">해시태그</p>
                   <div className="flex flex-wrap gap-1.5">
                     {courseBadges.map((b) => (
@@ -3264,15 +3366,28 @@ function CourseDetail({ id }: { id: string }) {
                 <div className="border-hairline border-b px-4 py-3">
                   <p className="mb-1.5 text-xs font-semibold text-gray-700">별점 · 즐겨찾기</p>
                   <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-1" title="별점">
-                      <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                      <span className="text-sm font-semibold text-gray-800">
+                    <div
+                      className="flex items-center gap-1"
+                      data-speakable
+                      aria-label={`별점 ${courseData.rating.toFixed(1)}점`}
+                    >
+                      <Star
+                        className="h-4 w-4 fill-yellow-400 text-yellow-400"
+                        aria-hidden="true"
+                      />
+                      <span className="text-sm font-semibold text-gray-800" aria-hidden="true">
                         {courseData.rating.toFixed(1)}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1" title="즐겨찾기">
-                      <Heart className="h-4 w-4 fill-red-400 text-red-400" />
-                      <span className="text-sm font-semibold text-gray-800">{likeCount}</span>
+                    <div
+                      className="flex items-center gap-1"
+                      data-speakable
+                      aria-label={`즐겨찾기 ${likeCount}개`}
+                    >
+                      <Heart className="h-4 w-4 fill-red-400 text-red-400" aria-hidden="true" />
+                      <span className="text-sm font-semibold text-gray-800" aria-hidden="true">
+                        {likeCount}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -3308,18 +3423,29 @@ function CourseDetail({ id }: { id: string }) {
                     </div>
                   )}
 
-                  {/* 기간 (readonly) */}
-                  {(courseData.startDate || courseData.endDate) && (
-                    <div className="border-hairline border-b px-4 py-3">
-                      <p className="mb-1.5 text-xs font-semibold text-gray-700">기간</p>
-                      <div className="flex items-center gap-1.5 text-sm text-gray-600">
-                        <Calendar className="h-4 w-4 text-gray-400" />
-                        <span>{formatDateOnly(courseData.startDate)}</span>
-                        <span className="text-gray-300">~</span>
-                        <span>{formatDateOnly(courseData.endDate)}</span>
-                      </div>
+                  {/* 기간 (readonly) — 값이 없어도 항목 자체는 항상 보여준다. 편집 화면과 완전히
+                      같은 모양의 <input type="date"> 를 readOnly로 재사용해, 값 읽기·포커스
+                      이동까지 편집 화면에서 이미 고친 처리(aria-label + 값 읽기)를 물려받는다. */}
+                  <div className="border-hairline border-b px-4 py-3">
+                    <p className="mb-1.5 text-xs font-semibold text-gray-700">기간</p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={courseData.startDate ?? ""}
+                        readOnly
+                        aria-label="시작일"
+                        className="border-hairline text-slate min-w-0 flex-1 rounded-lg border px-2 py-2 text-xs focus:outline-none"
+                      />
+                      <span className="text-stone shrink-0 text-xs">~</span>
+                      <input
+                        type="date"
+                        value={courseData.endDate ?? ""}
+                        readOnly
+                        aria-label="종료일"
+                        className="border-hairline text-slate min-w-0 flex-1 rounded-lg border px-2 py-2 text-xs focus:outline-none"
+                      />
                     </div>
-                  )}
+                  </div>
 
                   {/* Day tabs — 코스 편집 폼의 "일정" 섹션과 라벨·버튼 스타일을 맞췄다. */}
                   <div className="border-hairline border-b px-4 py-3">
@@ -3354,6 +3480,8 @@ function CourseDetail({ id }: { id: string }) {
                         <div
                           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
                           style={{ background: getCategoryColor(place.categoryCode) }}
+                          data-speakable
+                          aria-label={`${koreanOrdinal(index + 1)} 장소`}
                         >
                           {index + 1}
                         </div>
@@ -3494,18 +3622,21 @@ function CourseDetail({ id }: { id: string }) {
                       <button
                         onClick={handleToggleFavorite}
                         disabled={favoriteBusy}
+                        aria-label={favorited ? "즐겨찾기 해제" : "즐겨찾기 추가"}
                         className={`shrink-0 rounded-xl border px-3 py-2.5 transition-colors disabled:opacity-60 ${favorited ? "border-red-300 bg-red-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
                       >
                         <Heart
                           className={`h-4 w-4 ${favorited ? "fill-red-500 text-red-500" : "text-gray-700"}`}
+                          aria-hidden="true"
                         />
                       </button>
                       <button
                         onClick={handleShareKakao}
                         disabled={sharing}
+                        aria-label="카카오톡으로 공유"
                         className="shrink-0 rounded-xl border border-gray-200 bg-white px-3 py-2.5 transition-colors hover:bg-gray-50 disabled:opacity-60"
                       >
-                        <Share2 className="h-4 w-4 text-gray-700" />
+                        <Share2 className="h-4 w-4 text-gray-700" aria-hidden="true" />
                       </button>
                     </>
                   )}
@@ -3513,9 +3644,10 @@ function CourseDetail({ id }: { id: string }) {
                     <button
                       onClick={handleDeleteCourse}
                       disabled={deleting}
+                      aria-label="코스 삭제"
                       className="shrink-0 rounded-xl border border-gray-200 bg-white px-3 py-2.5 transition-colors hover:bg-gray-50 disabled:opacity-60"
                     >
-                      <Trash2 className="h-4 w-4 text-gray-700" />
+                      <Trash2 className="h-4 w-4 text-gray-700" aria-hidden="true" />
                     </button>
                   )}
                 </div>
