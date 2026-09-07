@@ -2680,7 +2680,10 @@ function CourseDetail({ id }: { id: string }) {
       return;
     }
 
-    // 기존 코스 편집 — tb_course 는 update, tb_course_detail 은 통째로 delete 후 재삽입.
+    // 기존 코스 편집 — tb_course update + tb_course_detail 전체 재구성을 RPC 하나로 묶어서
+    // 원자적으로 처리한다(update_course_with_details, supabase/schema-course-update-atomic.sql).
+    // 예전엔 update → delete → insert를 클라이언트에서 3번 나눠 호출해서, delete는 성공하고
+    // insert가 실패하면(네트워크 오류 등) 기존 장소 일정이 통째로 사라진 채 에러만 떴다.
     if (!isNew) {
       setSaving(true);
       setSaveError("");
@@ -2688,40 +2691,27 @@ function CourseDetail({ id }: { id: string }) {
         const { createClient } = await import("@/utils/supabase/client");
         const supabase = createClient();
 
-        const { error: updateErr } = await supabase
-          .from("tb_course")
-          .update({
-            course_nm: editTitle.trim(),
-            open_yn: editIsPrivate ? "N" : "Y",
-            startdate: editStartDate || null,
-            enddate: editEndDate || null,
-            updatetime: new Date().toISOString(),
-            updater: user.id
-          })
-          .eq("course_id", numId);
-        if (updateErr) throw updateErr;
-
-        const { error: deleteErr } = await supabase
-          .from("tb_course_detail")
-          .delete()
-          .eq("course_id", numId);
-        if (deleteErr) throw deleteErr;
-
-        const detailRows = editDays.flatMap((d) =>
+        const details = editDays.flatMap((d) =>
           d.places
             .filter((p) => p.placeId != null)
             .map((p) => ({
-              course_id: numId,
               day: d.day,
               place_id: p.placeId as number,
               starthour: p.startHour,
               endhour: p.endHour
             }))
         );
-        if (detailRows.length > 0) {
-          const { error: detailErr } = await supabase.from("tb_course_detail").insert(detailRows);
-          if (detailErr) throw detailErr;
-        }
+
+        const { error: rpcErr } = await supabase.rpc("update_course_with_details", {
+          p_course_id: numId,
+          p_course_nm: editTitle.trim(),
+          p_open_yn: editIsPrivate ? "N" : "Y",
+          p_startdate: editStartDate || null,
+          p_enddate: editEndDate || null,
+          p_updater: user.id,
+          p_details: details
+        });
+        if (rpcErr) throw rpcErr;
 
         // DB 에서 다시 읽어와 detail_id 등 최신 상태로 갱신.
         let alive = true;
