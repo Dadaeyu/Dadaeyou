@@ -26,6 +26,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Tabs } from "@/components/ui/Tabs";
+import { Select } from "@/components/ui/Select";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { formatCommunityDate, formatCommunityDateTime } from "@/lib/community/format";
 import { COMMUNITY_DEFAULT_PAGE_SIZE, COMMUNITY_PAGE_SIZES } from "@/lib/pagination";
@@ -228,21 +229,17 @@ function PageSizeSelect({
   disabled?: boolean;
 }) {
   return (
-    <label className="text-steel flex min-h-11 items-center gap-2 text-sm">
+    <div className="text-steel flex min-h-11 items-center gap-2 text-sm">
       <span className="whitespace-nowrap">표시</span>
-      <select
-        value={value}
+      <Select
+        value={String(value)}
         disabled={disabled}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="border-hairline bg-background text-ink focus:ring-brand-500 min-h-11 rounded-xl border px-3 py-2 text-sm focus:ring-2 focus:outline-none"
-      >
-        {COMMUNITY_PAGE_SIZES.map((n) => (
-          <option key={n} value={n}>
-            {n}개씩
-          </option>
-        ))}
-      </select>
-    </label>
+        onChange={(v) => onChange(Number(v))}
+        ariaLabel="표시"
+        className="bg-background text-ink min-h-11 w-auto rounded-xl px-3 py-2 text-sm"
+        options={COMMUNITY_PAGE_SIZES.map((n) => ({ value: String(n), label: `${n}개씩` }))}
+      />
+    </div>
   );
 }
 

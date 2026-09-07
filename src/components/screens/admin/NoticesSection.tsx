@@ -8,6 +8,7 @@ import { isEndBeforeStart, resolveEndAfterStartChange } from "@/lib/date-range";
 import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { AdminFormShell, AdminListShell } from "./AdminListShell";
 import { AdminSearchBar } from "./AdminSearchBar";
+import { Select } from "@/components/ui/Select";
 import { useAdminListMode } from "./useAdminListMode";
 import {
   fieldInputClass,
@@ -433,15 +434,17 @@ export function NoticesSection() {
       toolbar={
         <>
           <AdminSearchBar value={searchInput} onChange={setSearchInput} placeholder="제목 검색" />
-          <select
+          <Select
             value={activeFilter}
-            onChange={(e) => setFilter("active", e.target.value === "all" ? null : e.target.value)}
-            className={fieldSelectClass}
-          >
-            <option value="all">전체 상태</option>
-            <option value="active">활성</option>
-            <option value="inactive">비활성</option>
-          </select>
+            onChange={(v) => setFilter("active", v === "all" ? null : v)}
+            ariaLabel="상태 필터"
+            className={`${fieldSelectClass} w-auto`}
+            options={[
+              { value: "all", label: "전체 상태" },
+              { value: "active", label: "활성" },
+              { value: "inactive", label: "비활성" }
+            ]}
+          />
         </>
       }
     >

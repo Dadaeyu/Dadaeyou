@@ -11,8 +11,10 @@ import {
   resolveEventBadgeColor,
   validateEventPeriod
 } from "@/lib/community/event-ui";
-import { openNativeDatePicker, resolveEndAfterStartChange } from "@/lib/date-range";
+import { resolveEndAfterStartChange } from "@/lib/date-range";
 import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
+import { Select } from "@/components/ui/Select";
+import { DateField } from "@/components/ui/DateField";
 import { AdminFormShell, AdminListShell } from "./AdminListShell";
 import { AdminSearchBar } from "./AdminSearchBar";
 import { useAdminListMode } from "./useAdminListMode";
@@ -74,7 +76,6 @@ const EMPTY_FORM: FormState = {
   sortOrder: 0
 };
 
-const dateInputClass = `${fieldInputClass} min-w-[10.5rem] flex-1`;
 const sideLabelClass = "text-stone shrink-0 text-xs font-semibold sm:mb-0 sm:w-24";
 
 function toDateInputValue(value: string | null | undefined): string {
@@ -408,12 +409,10 @@ export function EventsSection() {
         <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
           <span className={sideLabelClass}>기간</span>
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-            <input
-              type="date"
+            <DateField
               value={form.periodStart}
               max={form.periodEnd || undefined}
-              onChange={(e) => {
-                const periodStart = e.target.value;
+              onChange={(periodStart) => {
                 setForm((f) => ({
                   ...f,
                   periodStart,
@@ -421,17 +420,14 @@ export function EventsSection() {
                 }));
                 setFormError(null);
               }}
-              onClick={(e) => openNativeDatePicker(e.currentTarget)}
-              className={dateInputClass}
-              aria-label="시작일"
+              className="min-w-[10.5rem] flex-1"
+              ariaLabel="시작일"
             />
             <span className="text-stone text-sm">~</span>
-            <input
-              type="date"
+            <DateField
               value={form.periodEnd}
               min={form.periodStart || undefined}
-              onChange={(e) => {
-                const periodEnd = e.target.value;
+              onChange={(periodEnd) => {
                 if (form.periodStart && periodEnd && periodEnd < form.periodStart) {
                   setFormError("종료일은 시작일 이후여야 합니다.");
                   return;
@@ -439,9 +435,8 @@ export function EventsSection() {
                 setForm((f) => ({ ...f, periodEnd }));
                 setFormError(null);
               }}
-              onClick={(e) => openNativeDatePicker(e.currentTarget)}
-              className={dateInputClass}
-              aria-label="종료일"
+              className="min-w-[10.5rem] flex-1"
+              ariaLabel="종료일"
             />
           </div>
         </div>
@@ -541,15 +536,17 @@ export function EventsSection() {
             onChange={setSearchInput}
             placeholder="제목·요약 검색"
           />
-          <select
+          <Select
             value={visibleFilter}
-            onChange={(e) => setFilter("visible", e.target.value === "all" ? null : e.target.value)}
-            className={fieldSelectClass}
-          >
-            <option value="all">전체 노출</option>
-            <option value="visible">노출</option>
-            <option value="hidden">숨김</option>
-          </select>
+            onChange={(v) => setFilter("visible", v === "all" ? null : v)}
+            ariaLabel="노출 필터"
+            className={`${fieldSelectClass} w-auto`}
+            options={[
+              { value: "all", label: "전체 노출" },
+              { value: "visible", label: "노출" },
+              { value: "hidden", label: "숨김" }
+            ]}
+          />
         </>
       }
     >

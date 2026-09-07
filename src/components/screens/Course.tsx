@@ -53,6 +53,8 @@ import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 import { shareToKakaoTalk } from "@/lib/kakao/loadKakaoShare";
 import { fetchSharedCourses, type CourseSort } from "@/lib/supabase/courses";
 import type { TourismSharedCourse } from "@/lib/supabase/types";
+import { Select } from "@/components/ui/Select";
+import { DateField } from "@/components/ui/DateField";
 
 // 공유/내 코스 목록 정렬 — 등록일/제목/별점 각각 오름·내림차순.
 const COURSE_SORT_OPTIONS: { value: CourseSort; label: string }[] = [
@@ -1173,20 +1175,14 @@ export default function Course() {
                 </button>
               )}
             </div>
-            <div className="relative shrink-0">
-              <select
+            <div className="shrink-0">
+              <Select
                 value={sharedSort}
-                onChange={(e) => setSharedSort(e.target.value as CourseSort)}
-                aria-label="정렬 기준"
-                className="appearance-none rounded-xl border border-gray-200 bg-white py-2.5 pr-9 pl-3 text-sm font-semibold text-gray-700 outline-none"
-              >
-                {COURSE_SORT_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                onChange={(v) => setSharedSort(v as CourseSort)}
+                ariaLabel="정렬 기준"
+                className="rounded-xl border-gray-200 py-2.5 pr-3 pl-3 text-sm font-semibold text-gray-700"
+                options={COURSE_SORT_OPTIONS}
+              />
             </div>
           </div>
 
@@ -1554,20 +1550,14 @@ export default function Course() {
                     </button>
                   )}
                 </div>
-                <div className="relative shrink-0">
-                  <select
+                <div className="shrink-0">
+                  <Select
                     value={mySort}
-                    onChange={(e) => setMySort(e.target.value as CourseSort)}
-                    aria-label="정렬 기준"
-                    className="appearance-none rounded-xl border border-gray-200 bg-white py-2.5 pr-9 pl-3 text-sm font-semibold text-gray-700 outline-none"
-                  >
-                    {COURSE_SORT_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                    onChange={(v) => setMySort(v as CourseSort)}
+                    ariaLabel="정렬 기준"
+                    className="rounded-xl border-gray-200 py-2.5 pr-3 pl-3 text-sm font-semibold text-gray-700"
+                    options={COURSE_SORT_OPTIONS}
+                  />
                 </div>
               </div>
 
@@ -3045,28 +3035,22 @@ function CourseDetail({ id }: { id: string }) {
 
               {/* 기간 (시작일 / 종료일) */}
               <div className="border-hairline-soft border-b px-4 py-3">
-                <p className="text-steel mb-1.5 text-xs font-semibold">기간</p>
+                <p className="text-steel mb-1.5 text-xs font-semibold">날짜</p>
                 <div className="flex items-center gap-2">
-                  <input
-                    type="date"
+                  <DateField
                     value={editStartDate}
                     max={editEndDate || undefined}
-                    onChange={(e) => handleStartDateChange(e.target.value)}
-                    // 브라우저 기본은 달력 아이콘을 눌러야만 picker가 뜨는 경우가 있다 —
-                    // 입력창 아무 곳을 눌러도 열리게 한다(미지원 브라우저는 조용히 무시).
-                    onClick={(e) => e.currentTarget.showPicker?.()}
-                    aria-label="시작일"
-                    className="focus:ring-brand-500 border-hairline text-slate min-w-0 flex-1 rounded-lg border px-2 py-2 text-xs focus:ring-2 focus:outline-none"
+                    onChange={handleStartDateChange}
+                    ariaLabel="시작일"
+                    className="text-slate py-2"
                   />
                   <span className="text-stone shrink-0 text-xs">~</span>
-                  <input
-                    type="date"
+                  <DateField
                     value={editEndDate}
                     min={editStartDate || undefined}
-                    onChange={(e) => handleEndDateChange(e.target.value)}
-                    onClick={(e) => e.currentTarget.showPicker?.()}
-                    aria-label="종료일"
-                    className="focus:ring-brand-500 border-hairline text-slate min-w-0 flex-1 rounded-lg border px-2 py-2 text-xs focus:ring-2 focus:outline-none"
+                    onChange={handleEndDateChange}
+                    ariaLabel="종료일"
+                    className="text-slate py-2"
                   />
                 </div>
               </div>
@@ -3077,7 +3061,7 @@ function CourseDetail({ id }: { id: string }) {
                   일정
                   {periodSet && (
                     <span className="text-stone ml-1 font-normal">
-                      · 기간에 맞춰 {editDays.length}일이 자동 구성돼요
+                      · 날짜에 맞춰 {editDays.length}일이 자동 구성돼요
                     </span>
                   )}
                 </p>
@@ -3194,51 +3178,49 @@ function CourseDetail({ id }: { id: string }) {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-semibold text-gray-800">{place.name}</p>
                         <div className="mt-0.5 flex items-center gap-1">
-                          <select
-                            value={place.startHour}
-                            aria-label={`${place.name} 시작 시각`}
-                            onChange={(e) =>
+                          <Select
+                            value={String(place.startHour)}
+                            ariaLabel={`${place.name} 시작 시각`}
+                            hideChevron
+                            onChange={(v) =>
                               setEditDays(
                                 editDays.map((d) => {
                                   if (d.day !== activeDay) return d;
                                   const updated = d.places.map((p, i) =>
-                                    i === idx ? { ...p, startHour: Number(e.target.value) } : p
+                                    i === idx ? { ...p, startHour: Number(v) } : p
                                   );
                                   return { ...d, places: updated };
                                 })
                               )
                             }
-                            className="focus:border-brand-400 rounded border border-gray-200 bg-transparent text-[10px] text-gray-500 focus:outline-none"
-                          >
-                            {HOUR_OPTIONS.map((h) => (
-                              <option key={h} value={h}>
-                                {h}시
-                              </option>
-                            ))}
-                          </select>
+                            className="focus:border-brand-400 h-auto w-auto rounded border border-gray-200 bg-transparent px-1.5 py-0.5 text-[10px] text-gray-500"
+                            options={HOUR_OPTIONS.map((h) => ({
+                              value: String(h),
+                              label: `${h}시`
+                            }))}
+                          />
                           <span className="text-[10px] text-gray-400">~</span>
-                          <select
-                            value={place.endHour}
-                            aria-label={`${place.name} 종료 시각`}
-                            onChange={(e) =>
+                          <Select
+                            value={String(place.endHour)}
+                            ariaLabel={`${place.name} 종료 시각`}
+                            hideChevron
+                            onChange={(v) =>
                               setEditDays(
                                 editDays.map((d) => {
                                   if (d.day !== activeDay) return d;
                                   const updated = d.places.map((p, i) =>
-                                    i === idx ? { ...p, endHour: Number(e.target.value) } : p
+                                    i === idx ? { ...p, endHour: Number(v) } : p
                                   );
                                   return { ...d, places: updated };
                                 })
                               )
                             }
-                            className="focus:border-brand-400 rounded border border-gray-200 bg-transparent text-[10px] text-gray-500 focus:outline-none"
-                          >
-                            {HOUR_OPTIONS.map((h) => (
-                              <option key={h} value={h}>
-                                {h}시
-                              </option>
-                            ))}
-                          </select>
+                            className="focus:border-brand-400 h-auto w-auto rounded border border-gray-200 bg-transparent px-1.5 py-0.5 text-[10px] text-gray-500"
+                            options={HOUR_OPTIONS.map((h) => ({
+                              value: String(h),
+                              label: `${h}시`
+                            }))}
+                          />
                         </div>
                       </div>
                       {/* Delete */}
@@ -3423,26 +3405,22 @@ function CourseDetail({ id }: { id: string }) {
                     </div>
                   )}
 
-                  {/* 기간 (readonly) — 값이 없어도 항목 자체는 항상 보여준다. 편집 화면과 완전히
-                      같은 모양의 <input type="date"> 를 readOnly로 재사용해, 값 읽기·포커스
-                      이동까지 편집 화면에서 이미 고친 처리(aria-label + 값 읽기)를 물려받는다. */}
+                  {/* 기간 (readonly) — 값이 없어도 항목 자체는 항상 보여준다. */}
                   <div className="border-hairline border-b px-4 py-3">
-                    <p className="mb-1.5 text-xs font-semibold text-gray-700">기간</p>
+                    <p className="mb-1.5 text-xs font-semibold text-gray-700">날짜</p>
                     <div className="flex items-center gap-2">
-                      <input
-                        type="date"
+                      <DateField
                         value={courseData.startDate ?? ""}
                         readOnly
-                        aria-label="시작일"
-                        className="border-hairline text-slate min-w-0 flex-1 rounded-lg border px-2 py-2 text-xs focus:outline-none"
+                        ariaLabel="시작일"
+                        className="text-slate py-2"
                       />
                       <span className="text-stone shrink-0 text-xs">~</span>
-                      <input
-                        type="date"
+                      <DateField
                         value={courseData.endDate ?? ""}
                         readOnly
-                        aria-label="종료일"
-                        className="border-hairline text-slate min-w-0 flex-1 rounded-lg border px-2 py-2 text-xs focus:outline-none"
+                        ariaLabel="종료일"
+                        className="text-slate py-2"
                       />
                     </div>
                   </div>
