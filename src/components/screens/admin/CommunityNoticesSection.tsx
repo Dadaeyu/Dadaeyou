@@ -8,6 +8,7 @@ import { formatCommunityDate } from "@/lib/community/format";
 import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { AdminFormShell, AdminListShell } from "./AdminListShell";
 import { AdminSearchBar } from "./AdminSearchBar";
+import { Select } from "@/components/ui/Select";
 import { useAdminListMode } from "./useAdminListMode";
 import { RichTextEditor } from "@/components/admin/RichTextEditor";
 import {
@@ -352,24 +353,28 @@ export function CommunityNoticesSection() {
       toolbar={
         <>
           <AdminSearchBar value={searchInput} onChange={setSearchInput} placeholder="제목 검색" />
-          <select
+          <Select
             value={visibleFilter}
-            onChange={(e) => setFilter("visible", e.target.value === "all" ? null : e.target.value)}
-            className={fieldSelectClass}
-          >
-            <option value="all">전체 노출</option>
-            <option value="visible">노출</option>
-            <option value="hidden">숨김</option>
-          </select>
-          <select
+            onChange={(v) => setFilter("visible", v === "all" ? null : v)}
+            ariaLabel="노출 필터"
+            className={`${fieldSelectClass} w-auto`}
+            options={[
+              { value: "all", label: "전체 노출" },
+              { value: "visible", label: "노출" },
+              { value: "hidden", label: "숨김" }
+            ]}
+          />
+          <Select
             value={pinnedFilter}
-            onChange={(e) => setFilter("pinned", e.target.value === "all" ? null : e.target.value)}
-            className={fieldSelectClass}
-          >
-            <option value="all">전체 고정</option>
-            <option value="pinned">고정</option>
-            <option value="unpinned">일반</option>
-          </select>
+            onChange={(v) => setFilter("pinned", v === "all" ? null : v)}
+            ariaLabel="고정 필터"
+            className={`${fieldSelectClass} w-auto`}
+            options={[
+              { value: "all", label: "전체 고정" },
+              { value: "pinned", label: "고정" },
+              { value: "unpinned", label: "일반" }
+            ]}
+          />
         </>
       }
     >

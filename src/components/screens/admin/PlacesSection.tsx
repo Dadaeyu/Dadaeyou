@@ -8,6 +8,7 @@ import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { ACCESSIBILITY_GROUPS } from "@/lib/place/accessibilityFields";
 import { AdminFormShell, AdminListShell } from "./AdminListShell";
 import { AdminSearchBar } from "./AdminSearchBar";
+import { Select } from "@/components/ui/Select";
 import { useAdminListMode } from "./useAdminListMode";
 import {
   fieldInputClass,
@@ -445,31 +446,27 @@ export function PlacesSection() {
             구 / 동 <span className="text-error">*</span>
           </span>
           <div className="flex min-w-0 flex-1 flex-wrap gap-2">
-            <select
+            <Select
               value={form.gu}
-              onChange={(e) => setForm((f) => ({ ...f, gu: e.target.value, dong: "" }))}
+              onChange={(v) => setForm((f) => ({ ...f, gu: v, dong: "" }))}
+              ariaLabel="구"
               className={`${fieldSelectClass} min-w-[8rem] flex-1`}
-            >
-              <option value="">구 선택</option>
-              {guOptions.map((g) => (
-                <option key={g.code} value={g.code}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-            <select
+              options={[
+                { value: "", label: "구 선택" },
+                ...guOptions.map((g) => ({ value: g.code, label: g.name }))
+              ]}
+            />
+            <Select
               value={form.dong}
-              onChange={(e) => setForm((f) => ({ ...f, dong: e.target.value }))}
+              onChange={(v) => setForm((f) => ({ ...f, dong: v }))}
               disabled={!form.gu}
+              ariaLabel="동"
               className={`${fieldSelectClass} min-w-[8rem] flex-1 disabled:opacity-60`}
-            >
-              <option value="">{form.gu ? "동 선택" : "구를 먼저 선택하세요"}</option>
-              {dongOptions.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: "", label: form.gu ? "동 선택" : "구를 먼저 선택하세요" },
+                ...dongOptions.map((d) => ({ value: d, label: d }))
+              ]}
+            />
           </div>
         </div>
 
@@ -525,18 +522,16 @@ export function PlacesSection() {
           <span className={sideLabelClass}>
             테마 <span className="text-error">*</span>
           </span>
-          <select
+          <Select
             value={form.lclssystm1}
-            onChange={(e) => setForm((f) => ({ ...f, lclssystm1: e.target.value }))}
-            className={fieldSelectClass}
-          >
-            <option value="">테마 선택</option>
-            {themeOptions.map((t) => (
-              <option key={t.code} value={t.code}>
-                {t.name}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setForm((f) => ({ ...f, lclssystm1: v }))}
+            ariaLabel="테마"
+            className={`${fieldSelectClass} w-auto`}
+            options={[
+              { value: "", label: "테마 선택" },
+              ...themeOptions.map((t) => ({ value: t.code, label: t.name }))
+            ]}
+          />
         </label>
 
         <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">

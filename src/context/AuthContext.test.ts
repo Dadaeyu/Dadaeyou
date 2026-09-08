@@ -405,3 +405,9 @@ test("사용자 A의 늦은 응답은 사용자 B의 회원 정보를 덮어쓰�
   assert.equal(harness.value?.member?.nickname, "새 사용자");
   assert.equal(harness.value?.preferences?.user_id, "user-b");
 });
+
+test("의도적 로그아웃 이후에는 SIGNED_IN 전까지 user 세션을 다시 심지 않는다", () => {
+  assert.match(source, /suppressStaleSessionRef/u);
+  assert.match(source, /suppressStaleSessionRef\.current = true/u);
+  assert.match(source, /suppressStaleSessionRef\.current && event !== ["']SIGNED_IN["']/u);
+});

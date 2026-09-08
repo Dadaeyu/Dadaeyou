@@ -6,7 +6,7 @@ const TOGGLES = [
   {
     key: "readAloud" as const,
     label: "음성 읽어주기",
-    description: "포커스·마우스 올린 내용 음성 안내",
+    description: "화면의 글·카드를 누르면 그 내용을 읽고, 다음 내용 읽기로 이어서 들을 수 있습니다",
     toggle: "toggleReadAloud" as const
   },
   {

@@ -622,6 +622,9 @@ function PlaceSyncSection() {
     }
     if (drag.moved) e.currentTarget.scrollLeft = drag.startScrollLeft - delta;
   };
+  // pointerup/pointercancel에서만 드래그를 끝낸다 — pointerleave로도 끝내면, 실제 손가락
+  // 드래그는 가로로만 움직이지 않고 위아래로도 살짝씩 벗어나기 마련이라 터치에서 드래그가
+  // 계속 끊겨 아주 조금씩만 스크롤되는 문제가 있었다.
   const handleTabPointerUp = () => {
     tabDragRef.current.down = false;
   };
@@ -649,7 +652,6 @@ function PlaceSyncSection() {
           onPointerMove={handleTabPointerMove}
           onPointerUp={handleTabPointerUp}
           onPointerCancel={handleTabPointerUp}
-          onPointerLeave={handleTabPointerUp}
           onClickCapture={handleTabClickCapture}
           className="border-hairline-soft flex cursor-grab touch-none [scrollbar-width:none] gap-1 overflow-x-auto border-b select-none [-ms-overflow-style:none] active:cursor-grabbing [&::-webkit-scrollbar]:hidden"
         >

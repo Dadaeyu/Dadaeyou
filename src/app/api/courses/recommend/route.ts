@@ -5,6 +5,7 @@ import { createTimeoutSignal } from "@/lib/server/timeout-signal";
 import { resolveChatClientKey } from "@/lib/chat/server/request-identity";
 import {
   reserveCourseRecommendUsage,
+  peekCourseRecommendUsage,
   CourseRecommendUsageError,
   COURSE_RECOMMEND_DAILY_LIMIT
 } from "@/lib/courseRecommend/usage";
@@ -64,6 +65,14 @@ type LlmCourseDraft = {
   summary?: unknown;
   placeIds?: unknown;
 };
+
+// "AI 코스 추천받기" 배너가 처음 렌더링될 때부터(누르기 전부터) 오늘 사용 현황을 보여주기
+// 위한 조회 전용 엔드포인트 — 카운트를 올리지 않는다.
+export async function GET(request: Request) {
+  const clientKey = await resolveChatClientKey(request);
+  const usage = await peekCourseRecommendUsage(clientKey);
+  return NextResponse.json({ usage });
+}
 
 export async function POST(request: Request) {
   try {

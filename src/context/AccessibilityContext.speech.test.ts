@@ -25,7 +25,6 @@ function setup() {
   const spoken: SpeechSynthesisUtterance[] = [];
   const speak = runInNewContext(ts.transpile(`const speak = ${speakSource}; speak;`), {
     useCallback: (callback: unknown) => callback,
-    lastSpoken: { current: null },
     activeUtterance: { current: null },
     window: {
       speechSynthesis: {
@@ -41,7 +40,7 @@ function setup() {
         this.text = text;
       }
     }
-  }) as (text: string) => void;
+  }) as (text: string, force?: boolean) => void;
   return { speak, spoken };
 }
 
@@ -70,4 +69,17 @@ test("이전 음성의 늦은 완료가 현재 음성의 중복 방지를 해제
   spoken[0].onend?.call(spoken[0], {} as SpeechSynthesisEvent);
   speak("다유에게 묻기");
   assert.equal(spoken.length, 2);
+});
+
+test("다음 내용 읽기는 같은 문구도 강제로 읽고 이전 완료 이벤트는 무시한다", () => {
+  const { speak, spoken } = setup();
+  speak("같은 내용");
+  speak("같은 내용", true);
+  assert.equal(spoken.length, 2);
+  spoken[0].onend?.call(spoken[0], {} as SpeechSynthesisEvent);
+  speak("같은 내용");
+  assert.equal(spoken.length, 2);
+  spoken[1].onend?.call(spoken[1], {} as SpeechSynthesisEvent);
+  speak("같은 내용");
+  assert.equal(spoken.length, 3);
 });

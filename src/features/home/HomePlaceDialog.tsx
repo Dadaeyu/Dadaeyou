@@ -279,6 +279,7 @@ export function HomePlaceDialog({
 
             <section
               data-place-section="visit"
+              data-speakable
               tabIndex={-1}
               className={`${usesSelectedNeedSummary ? "mt-10 border-t pt-9" : ""} border-hairline scroll-mt-14 outline-none`}
               aria-labelledby="visit-title"
@@ -490,7 +491,7 @@ function VisitInfoRow({
   const displayValue =
     label === "이용요금" ? summarizeHomeFee(value) : formatHomeDetailValue(value, label);
   return (
-    <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-3 py-4">
+    <div data-speakable className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-3 py-4">
       <span className="bg-surface text-steel grid h-10 w-10 place-items-center rounded-md">
         <Icon className="h-5 w-5" aria-hidden={true} />
       </span>

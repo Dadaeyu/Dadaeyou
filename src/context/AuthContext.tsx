@@ -40,40 +40,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(PUBLIC_SUPABASE_CONFIGURED);
   const activeUserIdRef = useRef<string | null>(null);
   const loadGenerationRef = useRef(0);
+  /** signOut 직후 늦게 도착하는 INITIAL_SESSION/TOKEN_REFRESHED가 user를 다시 심지 못하게 */
+  const suppressStaleSessionRef = useRef(false);
 
-  const loadUserData = useCallback(async (userId: string) => {
-    const generation = (loadGenerationRef.current += 1);
-    activeUserIdRef.current = userId;
+  const clearAuthState = useCallback(() => {
+    activeUserIdRef.current = null;
+    loadGenerationRef.current += 1;
+    setUser(null);
+    setSession(null);
+    setMember(null);
+    setPreferences(null);
+  }, []);
 
-    await callEnsureMember().catch(() => {});
+  const loadUserData = useCallback(
+    async (userId: string) => {
+      const generation = (loadGenerationRef.current += 1);
+      activeUserIdRef.current = userId;
 
-    const [m, prefs] = await Promise.all([
-      fetchMember(userId).catch(() => null),
-      fetchUserPreferences(userId).catch(() => null)
-    ]);
+      await callEnsureMember().catch(() => {});
 
-    if (activeUserIdRef.current !== userId || loadGenerationRef.current !== generation) {
-      return;
-    }
+      const [m, prefs] = await Promise.all([
+        fetchMember(userId).catch(() => null),
+        fetchUserPreferences(userId).catch(() => null)
+      ]);
 
-    if (m?.status === "withdrawn") {
-      const supabase = createClient();
-      await supabase.auth.signOut().catch(() => {});
       if (activeUserIdRef.current !== userId || loadGenerationRef.current !== generation) {
         return;
       }
-      activeUserIdRef.current = null;
-      loadGenerationRef.current += 1;
-      setUser(null);
-      setSession(null);
-      setMember(null);
-      setPreferences(null);
-      return;
-    }
 
-    setMember(m);
-    setPreferences(prefs);
-  }, []);
+      if (m?.status === "withdrawn") {
+        suppressStaleSessionRef.current = true;
+        const supabase = createClient();
+        await supabase.auth.signOut().catch(() => {});
+        if (activeUserIdRef.current !== userId || loadGenerationRef.current !== generation) {
+          return;
+        }
+        clearAuthState();
+        return;
+      }
+
+      setMember(m);
+      setPreferences(prefs);
+    },
+    [clearAuthState]
+  );
 
   const refreshMember = useCallback(async () => {
     if (!user) return;
@@ -95,53 +105,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     supabase.auth.getSession().then(({ data: { session: s } }) => {
       if (!isActive || loadGenerationRef.current !== sessionGeneration) return;
+      if (suppressStaleSessionRef.current && s?.user) return;
 
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) {
         loadUserData(s.user.id).finally(() => setLoading(false));
       } else {
-        activeUserIdRef.current = null;
-        loadGenerationRef.current += 1;
-        setMember(null);
-        setPreferences(null);
+        clearAuthState();
         setLoading(false);
       }
     });
 
     const {
       data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
-      setUser(s?.user ?? null);
+    } = supabase.auth.onAuthStateChange((event, s) => {
       if (s?.user) {
+        // 의도적 로그아웃 이후에는 실제 SIGNED_IN 전까지 옛 세션을 무시한다.
+        if (suppressStaleSessionRef.current && event !== "SIGNED_IN") {
+          return;
+        }
+        suppressStaleSessionRef.current = false;
+        setSession(s);
+        setUser(s.user);
         loadUserData(s.user.id).finally(() => setLoading(false));
-      } else {
-        activeUserIdRef.current = null;
-        loadGenerationRef.current += 1;
-        setMember(null);
-        setPreferences(null);
-        setLoading(false);
+        return;
       }
+
+      clearAuthState();
+      setLoading(false);
     });
 
     return () => {
       isActive = false;
       subscription.unsubscribe();
     };
-  }, [loadUserData]);
+  }, [clearAuthState, loadUserData]);
 
   const signOut = useCallback(async () => {
     if (!PUBLIC_SUPABASE_CONFIGURED) return;
-    activeUserIdRef.current = null;
-    loadGenerationRef.current += 1;
-    setUser(null);
-    setSession(null);
-    setMember(null);
-    setPreferences(null);
+    suppressStaleSessionRef.current = true;
+    clearAuthState();
     const supabase = createClient();
     await supabase.auth.signOut();
-  }, []);
+  }, [clearAuthState]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

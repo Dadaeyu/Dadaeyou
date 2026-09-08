@@ -7,7 +7,7 @@ const settingsConfig = [
   {
     key: "readAloud" as const,
     label: "음성 읽어주기",
-    description: "포커스·마우스 올린 내용 음성 안내",
+    description: "화면의 글·카드를 누르면 그 내용을 읽습니다",
     toggle: "toggleReadAloud" as const
   },
   {
@@ -40,7 +40,9 @@ export default function AccessibilitySettings({ onClose }: Props) {
     toggleDarkMode,
     toggleEasyMode,
     increaseFontScale,
-    decreaseFontScale
+    decreaseFontScale,
+    speakNext,
+    canSpeakNext
   } = useAccessibility();
 
   const values = { readAloud, highContrast, darkMode };
@@ -57,6 +59,7 @@ export default function AccessibilitySettings({ onClose }: Props) {
       <div
         role="dialog"
         aria-label="접근성 설정"
+        data-a11y-chrome
         className="border-hairline absolute top-full right-4 z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-xl border bg-white p-3 shadow-lg"
       >
         <p className="text-stone mb-2 px-1 text-xs font-semibold">접근성 설정</p>
@@ -87,6 +90,21 @@ export default function AccessibilitySettings({ onClose }: Props) {
               </div>
             </button>
           ))}
+
+          {readAloud ? (
+            <button
+              type="button"
+              data-a11y-speak-next
+              onClick={speakNext}
+              disabled={!canSpeakNext}
+              className="border-hairline text-ink hover:bg-surface disabled:text-stone mt-1 w-full rounded-lg border px-2 py-2 text-left text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              다음 내용 읽기
+              <span className="text-stone mt-0.5 block text-xs font-normal">
+                방금 읽은 칸의 다음 글을 이어서 듣습니다
+              </span>
+            </button>
+          ) : null}
 
           <button
             type="button"

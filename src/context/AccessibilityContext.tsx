@@ -17,10 +17,16 @@ import {
   FONT_SCALE_MAX,
   FONT_SCALE_MIN,
   FONT_SCALE_STEP,
+  findNextSpeakableBlock,
+  findSpeakableBlock,
   getSpeakableText,
+  HOVER_SPEAK_SELECTOR,
+  isA11yChrome,
   loadAccessibilityState,
   mergeAccessibilityPreferences,
+  resolveSpeechTarget,
   saveAccessibilityState,
+  shouldStopHoverSpeech,
   type AccessibilityState
 } from "@/lib/accessibility";
 import { useOptionalAuth } from "@/context/AuthContext";
@@ -34,6 +40,9 @@ interface AccessibilityContextValue extends AccessibilityState {
   increaseFontScale: () => void;
   decreaseFontScale: () => void;
   setFontScale: (value: number) => void;
+  /** 방금 읽은 블록의 다음 내용을 이어서 읽는다 */
+  speakNext: () => void;
+  canSpeakNext: boolean;
 }
 
 const AccessibilityContext = createContext<AccessibilityContextValue | null>(null);
@@ -41,8 +50,12 @@ const AccessibilityContext = createContext<AccessibilityContextValue | null>(nul
 export function AccessibilityProvider({ children }: { children: ReactNode }) {
   const auth = useOptionalAuth();
   const [state, setState] = useState<AccessibilityState>(DEFAULT_A11Y_STATE);
+  const [canSpeakNext, setCanSpeakNext] = useState(false);
   const stateRef = useRef(state);
   const activeUtterance = useRef<SpeechSynthesisUtterance | null>(null);
+  const lastBlockRef = useRef<Element | null>(null);
+  /** 호버로 시작한 읽기만 마우스 이탈 시 중지한다 */
+  const speakSourceRef = useRef<"hover" | "other">("other");
   const loaded = useRef(false);
   const syncedFromDb = useRef(false);
   const syncedUserId = useRef<string | null>(null);
@@ -109,9 +122,9 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
     [auth]
   );
 
-  const speak = useCallback((text: string) => {
+  const speak = useCallback((text: string, force = false) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
-    if (activeUtterance.current?.text === text) return;
+    if (!force && activeUtterance.current?.text === text) return;
 
     activeUtterance.current = null;
     window.speechSynthesis.cancel();
@@ -132,44 +145,118 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const speakBlock = useCallback(
+    (block: Element, force = false) => {
+      const text = getSpeakableText(block);
+      if (!text) return false;
+      lastBlockRef.current = block;
+      setCanSpeakNext(Boolean(findNextSpeakableBlock(block)));
+      speak(text, force);
+      return true;
+    },
+    [speak]
+  );
+
+  const speakNext = useCallback(() => {
+    const current = lastBlockRef.current;
+    if (!current || !document.contains(current)) {
+      setCanSpeakNext(false);
+      return;
+    }
+    const next = findNextSpeakableBlock(current);
+    if (!next) {
+      setCanSpeakNext(false);
+      speakSourceRef.current = "other";
+      speak("다음 읽을 내용이 없습니다.", true);
+      return;
+    }
+    speakSourceRef.current = "other";
+    speakBlock(next, true);
+  }, [speak, speakBlock]);
+
   useEffect(() => {
     if (!state.readAloud) {
       activeUtterance.current = null;
+      lastBlockRef.current = null;
+      speakSourceRef.current = "other";
+      setCanSpeakNext(false);
       window.speechSynthesis?.cancel();
       return;
     }
 
-    const handleFocusIn = (event: FocusEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
+    const cancelHoverSpeech = () => {
+      if (speakSourceRef.current !== "hover") return;
+      window.speechSynthesis?.cancel();
+      activeUtterance.current = null;
+      speakSourceRef.current = "other";
+    };
 
-      const text = getSpeakableText(target);
-      if (text) speak(text);
+    const handleFocusIn = (event: FocusEvent) => {
+      const raw = event.target;
+      if (!(raw instanceof Element)) return;
+      // aria-hidden 아이콘/숫자(예: 별점 배지 안) 위가 실제 이벤트 target일 수 있다 — 그걸
+      // 그대로 chrome 판정에 넘기면 정작 부모 배지의 읽기 자체가 죽는다. 숨김 조상을
+      // 벗어난 지점부터 판단한다.
+      const target = resolveSpeechTarget(raw);
+      if (isA11yChrome(target)) return;
+
+      const block = findSpeakableBlock(target) ?? target;
+      if (speakBlock(block)) speakSourceRef.current = "other";
     };
 
     const handleMouseOver = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
+      const raw = event.target;
+      if (!(raw instanceof Element)) return;
+      const target = resolveSpeechTarget(raw);
+      if (isA11yChrome(target)) return;
 
-      const interactive = target.closest(
-        "button, a, [role='button'], [role='link'], input, textarea, select"
-      );
-      if (!interactive || interactive !== target) return;
+      // 버튼·링크가 있으면 그걸 우선하고(목록은 카드 전체가 링크), 없으면 클릭과 같은 기준으로
+      // 가장 가까운 내용 블록을 읽는다 — 상세 화면처럼 본문이 일반 텍스트인 곳도 호버로 읽히게.
+      const block = target.closest(HOVER_SPEAK_SELECTOR) ?? findSpeakableBlock(target);
+      if (!block) return;
 
-      const text = getSpeakableText(interactive);
-      if (text) speak(text);
+      if (speakBlock(block)) speakSourceRef.current = "hover";
+    };
+
+    const handleClick = (event: MouseEvent) => {
+      const raw = event.target;
+      if (!(raw instanceof Element)) return;
+      const target = resolveSpeechTarget(raw);
+      if (isA11yChrome(target)) return;
+
+      // 접근성 패널의 「다음 내용 읽기」는 클릭 읽기 대상에서 제외
+      if (target.closest("[data-a11y-speak-next]")) return;
+
+      const block = findSpeakableBlock(target);
+      if (!block) return;
+      if (speakBlock(block)) speakSourceRef.current = "other";
+    };
+
+    const handleMouseOut = (event: MouseEvent) => {
+      if (!shouldStopHoverSpeech(event.relatedTarget)) return;
+      cancelHoverSpeech();
+    };
+
+    const handleDocumentLeave = () => {
+      cancelHoverSpeech();
     };
 
     document.addEventListener("focusin", handleFocusIn);
     document.addEventListener("mouseover", handleMouseOver);
+    document.addEventListener("mouseout", handleMouseOut);
+    document.addEventListener("click", handleClick, true);
+    document.documentElement.addEventListener("mouseleave", handleDocumentLeave);
 
     return () => {
       document.removeEventListener("focusin", handleFocusIn);
       document.removeEventListener("mouseover", handleMouseOver);
       activeUtterance.current = null;
+      document.removeEventListener("mouseout", handleMouseOut);
+      document.removeEventListener("click", handleClick, true);
+      document.documentElement.removeEventListener("mouseleave", handleDocumentLeave);
       window.speechSynthesis?.cancel();
     };
-  }, [state.readAloud, speak]);
+  }, [state.readAloud, speakBlock]);
 
   const updateState = useCallback(
     (updater: (prev: AccessibilityState) => AccessibilityState) => {
@@ -231,7 +318,9 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
       toggleReadAloud,
       increaseFontScale,
       decreaseFontScale,
-      setFontScale
+      setFontScale,
+      speakNext,
+      canSpeakNext
     }),
     [
       state,
@@ -241,7 +330,9 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
       toggleReadAloud,
       increaseFontScale,
       decreaseFontScale,
-      setFontScale
+      setFontScale,
+      speakNext,
+      canSpeakNext
     ]
   );
 

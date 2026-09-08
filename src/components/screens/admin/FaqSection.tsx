@@ -7,6 +7,7 @@ import { validateFaqFields } from "@/lib/community/validation";
 import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { AdminFormShell, AdminListShell } from "./AdminListShell";
 import { AdminSearchBar } from "./AdminSearchBar";
+import { Select } from "@/components/ui/Select";
 import { useAdminListMode } from "./useAdminListMode";
 import {
   fieldInputClass,
@@ -287,15 +288,17 @@ export function FaqSection() {
             onChange={setSearchInput}
             placeholder="질문·답변 검색"
           />
-          <select
+          <Select
             value={visibleFilter}
-            onChange={(e) => setFilter("visible", e.target.value === "all" ? null : e.target.value)}
-            className={fieldSelectClass}
-          >
-            <option value="all">전체 노출</option>
-            <option value="visible">노출</option>
-            <option value="hidden">숨김</option>
-          </select>
+            onChange={(v) => setFilter("visible", v === "all" ? null : v)}
+            ariaLabel="노출 필터"
+            className={`${fieldSelectClass} w-auto`}
+            options={[
+              { value: "all", label: "전체 노출" },
+              { value: "visible", label: "노출" },
+              { value: "hidden", label: "숨김" }
+            ]}
+          />
         </>
       }
     >

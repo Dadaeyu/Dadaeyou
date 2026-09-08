@@ -1480,10 +1480,47 @@ function outcomeToJson(
 // 몫으로 시간을 미리 떼어두고, detail/barrierfree/bakery는 그보다 앞당긴 시각까지만 돌게 한다.
 const NORMALIZE_RESERVED_MS = 8_000;
 
+// place/bakery 는 커서 없이 매번 전체를 다시 조회하는 구조라, 짧은 간격(예: 1분)으로 하루 종일
+// 반복 호출되면 detail/barrierfree 가 아직 진행 중인 동안에도 회차마다 계속 전체를 재조회하게
+// 된다 — API 호출 낭비이자 회차당 시간 예산도 깎아먹는다. 이미 그날 한 번 끝났으면
+// skipPlace/skipBakery 로 건너뛸 수 있게 한다(호출 쪽에서 DB에 저장된 완료 여부로 판단).
+function skippedOutcome(): SyncOutcome {
+  return {
+    ok: true,
+    result: {
+      totalPlaces: 0,
+      fetched: 0,
+      upserted: 0,
+      deleted: 0,
+      skipped: 0,
+      errorCount: 0,
+      errors: [],
+      notDone: false
+    }
+  };
+}
+
+function skippedBakeryOutcome(): BakerySyncOutcome {
+  return {
+    ok: true,
+    result: {
+      totalCount: 0,
+      fetched: 0,
+      inserted: 0,
+      updated: 0,
+      deleted: 0,
+      errorCount: 0,
+      errors: [],
+      notDone: false
+    }
+  };
+}
+
 export async function runFullSync(
   supabase: SupabaseClient,
   deadline: number,
-  cursors: { detail?: number; barrierfree?: number; normalize?: number } = {}
+  cursors: { detail?: number; barrierfree?: number; normalize?: number } = {},
+  options: { skipPlace?: boolean; skipBakery?: boolean } = {}
 ): Promise<
   Record<
     "place" | "detail" | "barrierfree" | "bakery" | "normalize",
@@ -1493,12 +1530,20 @@ export async function runFullSync(
   const innerDeadline = deadline - NORMALIZE_RESERVED_MS;
 
   // 0) tb_place 와 무관한 bakery 동기화를 먼저 시작(await 하지 않고 병렬 진행)
-  const bakeryPromise = syncBakery(supabase, innerDeadline);
+  const bakeryPromise = options.skipBakery
+    ? Promise.resolve(skippedBakeryOutcome())
+    : syncBakery(supabase, innerDeadline);
 
   // 1) 원본 테이블 tb_place 선행 동기화
-  console.log("[sync] tb_place 동기화 시작");
-  const placeOutcome = await syncPlace(supabase, deadline);
-  console.log("[sync] tb_place 완료 → detail/barrierfree 병렬 시작");
+  let placeOutcome: SyncOutcome;
+  if (options.skipPlace) {
+    console.log("[sync] tb_place 오늘 이미 완료 — 건너뜀");
+    placeOutcome = skippedOutcome();
+  } else {
+    console.log("[sync] tb_place 동기화 시작");
+    placeOutcome = await syncPlace(supabase, deadline);
+    console.log("[sync] tb_place 완료 → detail/barrierfree 병렬 시작");
+  }
 
   // 2) tb_place_detail / tb_place_barrierfree 병렬 동기화 (서로 독립) + bakery 수거.
   //    셋 다 같은 innerDeadline 을 공유한다 — 각자 그 시각이 되면 알아서 중단하고 notDone 을 남긴다.

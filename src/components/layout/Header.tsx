@@ -24,6 +24,7 @@ export default function Header() {
     try {
       await auth.signOut();
       router.push("/");
+      router.refresh();
     } finally {
       setLoggingOut(false);
     }

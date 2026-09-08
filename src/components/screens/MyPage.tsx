@@ -120,35 +120,33 @@ export default function MyPage() {
 
   return (
     <div className="space-y-6">
-      {/* 프로필 요약 */}
-      <div className="border-hairline overflow-hidden rounded-2xl border bg-white">
+      {/* 프로필 요약 — 아바타만 그라데이션에 걸치고, 닉네임은 흰 영역에 둔다 */}
+      <div className="border-hairline bg-background overflow-hidden rounded-2xl border">
         <div className="from-navy-700 via-navy-600 to-brand-500 h-20 bg-gradient-to-br" />
-        <div className="-mt-10 px-5 pb-5 md:px-6">
-          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-            <div className="flex items-end gap-4">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white text-4xl shadow-md ring-4 ring-white">
-                {member?.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={member.avatar_url} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  "👤"
-                )}
-              </div>
-              <div className="pb-1">
-                <h2 className="text-xl font-bold text-gray-800">{member?.nickname ?? "회원"}</h2>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-                    {gender}
-                  </span>
-                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-                    {age}
-                  </span>
-                </div>
+        <div className="px-5 pb-5 md:px-6">
+          <div className="-mt-10 mb-3 flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white text-4xl shadow-md ring-4 ring-white">
+            {member?.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={member.avatar_url} alt="" className="h-full w-full object-cover" />
+            ) : (
+              "👤"
+            )}
+          </div>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-ink text-xl font-bold">{member?.nickname ?? "회원"}</h2>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <span className="bg-surface text-steel rounded-full px-2 py-0.5 text-xs">
+                  {gender}
+                </span>
+                <span className="bg-surface text-steel rounded-full px-2 py-0.5 text-xs">
+                  {age}
+                </span>
               </div>
             </div>
             <Link
               href="/mypage/settings"
-              className="border-hairline flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50"
+              className="border-hairline text-steel hover:bg-surface flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors"
             >
               <Pencil className="h-3.5 w-3.5" />
               프로필 편집
