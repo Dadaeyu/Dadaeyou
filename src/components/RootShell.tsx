@@ -16,6 +16,7 @@ import NoticeModal, {
 } from "@/components/NoticeModal";
 import { LegalLinks } from "@/components/legal/LegalLinks";
 import { NavigationProgress } from "@/components/NavigationProgress";
+import { HomeBackExitGuard } from "@/components/HomeBackExitGuard";
 import { GuestWelcomePrompt } from "@/components/auth/GuestWelcomePrompt";
 import { isPublicLegalPath, shouldShowGlobalLegalFooter } from "@/lib/legal/legalRoutes";
 import { cn } from "@/components/ui/utils";
@@ -94,6 +95,7 @@ export default function RootShell({
           <>
             <div className="bg-background flex min-h-dvh flex-col">
               <NavigationProgress />
+              <HomeBackExitGuard />
               <a
                 href="#main"
                 className="focus:bg-brand-500 sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:rounded-lg focus:px-4 focus:py-2 focus:font-semibold focus:text-white"

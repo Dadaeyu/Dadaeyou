@@ -42,7 +42,7 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
   const auth = useOptionalAuth();
   const [state, setState] = useState<AccessibilityState>(DEFAULT_A11Y_STATE);
   const stateRef = useRef(state);
-  const lastSpoken = useRef<string | null>(null);
+  const activeUtterance = useRef<SpeechSynthesisUtterance | null>(null);
   const loaded = useRef(false);
   const syncedFromDb = useRef(false);
   const syncedUserId = useRef<string | null>(null);
@@ -111,20 +111,30 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
 
   const speak = useCallback((text: string) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
-    if (lastSpoken.current === text) return;
+    if (activeUtterance.current?.text === text) return;
 
-    lastSpoken.current = text;
+    activeUtterance.current = null;
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
+    activeUtterance.current = utterance;
+    const release = () => {
+      if (activeUtterance.current === utterance) activeUtterance.current = null;
+    };
+    utterance.onend = release;
+    utterance.onerror = release;
     utterance.lang = "ko-KR";
     utterance.rate = 1;
-    window.speechSynthesis.speak(utterance);
+    try {
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      release();
+    }
   }, []);
 
   useEffect(() => {
     if (!state.readAloud) {
-      lastSpoken.current = null;
+      activeUtterance.current = null;
       window.speechSynthesis?.cancel();
       return;
     }
@@ -156,6 +166,7 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
     return () => {
       document.removeEventListener("focusin", handleFocusIn);
       document.removeEventListener("mouseover", handleMouseOver);
+      activeUtterance.current = null;
       window.speechSynthesis?.cancel();
     };
   }, [state.readAloud, speak]);

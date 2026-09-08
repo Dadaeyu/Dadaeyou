@@ -18,6 +18,7 @@ import {
   getPublicChatSourceLabel
 } from "@/lib/chat/presentation";
 import { getChatScrollTarget } from "@/lib/chat/scrollTarget";
+import { requestChatJson } from "@/lib/chat/client-request";
 import {
   Accessibility,
   ArrowRight,
@@ -210,6 +211,8 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
   const [isListening, setIsListening] = useState(false);
   const [isConversationMode, setIsConversationMode] = useState(false);
   const [voiceInputStatus, setVoiceInputStatus] = useState("");
+  const [requestNotice, setRequestNotice] = useState("");
+  const [retryQuestion, setRetryQuestion] = useState("");
   const messageListRef = useRef<HTMLDivElement>(null);
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
   const lastAutoSpokenMessageIdRef = useRef<number | null>(null);
@@ -220,6 +223,11 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
   const isLoadingRef = useRef(false);
   const voiceSessionIdRef = useRef(0);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const activeRequestRef = useRef<AbortController | null>(null);
+  const pendingQuestionRef = useRef("");
+  const pendingUserMessageIdRef = useRef<number | null>(null);
+  const relatedRequestsRef = useRef(new Set<AbortController>());
+  const speechRequestIdRef = useRef(0);
   const {
     isAvailable: ttsSupported,
     speak: speakWithTts,
@@ -233,6 +241,7 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
   }
 
   useEffect(() => {
+    const relatedRequests = relatedRequestsRef.current;
     const timerId = window.setTimeout(() => {
       setSttSupported(Boolean(getSpeechRecognitionConstructor()));
     }, 0);
@@ -241,6 +250,10 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
       window.clearTimeout(timerId);
       clearConversationRestartTimer();
       recognitionRef.current?.abort();
+      activeRequestRef.current?.abort();
+      activeRequestRef.current = null;
+      for (const controller of relatedRequests) controller.abort();
+      relatedRequests.clear();
     };
   }, []);
 
@@ -537,23 +550,81 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
     }, delay);
   }
 
-  async function readChatErrorMessage(response: Response) {
-    try {
-      const data = (await response.json()) as { error?: unknown; message?: unknown };
-      if (typeof data.error === "string" && data.error.trim()) return data.error.trim();
-      if (typeof data.message === "string" && data.message.trim()) return data.message.trim();
-    } catch {
-      return "";
-    }
+  async function loadRelatedCourses(messageId: number, data: ChatResponse, question: string) {
+    const contentIds = (data.places ?? []).flatMap((place) =>
+      place.contentId ? [place.contentId] : []
+    );
+    const courseRequested = isCourseRecommendationRequest(question);
+    if (!contentIds.length && !courseRequested) return;
 
-    return "";
+    const controller = new AbortController();
+    relatedRequestsRef.current.add(controller);
+    try {
+      const init = {
+        signal: controller.signal,
+        credentials: "same-origin",
+        cache: "no-store"
+      } as const;
+      let payload = await requestChatJson<{ items?: TourismSharedCourse[] }>(
+        buildRelatedCourseQuery(contentIds),
+        init,
+        8_000
+      );
+      if (!payload.items?.length && courseRequested && contentIds.length) {
+        payload = await requestChatJson<{ items?: TourismSharedCourse[] }>(
+          buildRelatedCourseQuery([]),
+          init,
+          8_000
+        );
+      }
+      if (controller.signal.aborted || !payload.items?.length) return;
+      const courses = payload.items;
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === messageId && message.role === "assistant"
+            ? { ...message, content: { ...message.content, courses } }
+            : message
+        )
+      );
+    } catch {
+      // 관련 코스를 받지 못해도 먼저 표시한 장소 답변은 유지한다.
+    } finally {
+      relatedRequestsRef.current.delete(controller);
+    }
+  }
+
+  function cancelRequest() {
+    const controller = activeRequestRef.current;
+    if (!controller) return;
+    activeRequestRef.current = null;
+    controller.abort();
+    speechRequestIdRef.current += 1;
+    isLoadingRef.current = false;
+    setIsLoading(false);
+    setInput(pendingQuestionRef.current);
+    setRetryQuestion(pendingQuestionRef.current);
+    setRequestNotice("답변 요청을 취소했어요. 질문을 수정하거나 다시 시도할 수 있어요.");
+    conversationModeRef.current = false;
+    setIsConversationMode(false);
+    clearConversationRestartTimer();
+    abortVoiceInput();
+    stopSpeech();
   }
 
   async function sendMessage(message: string, options: { continueConversation?: boolean } = {}) {
     const text = message.trim();
     if (!text || isLoadingRef.current) return;
-    const history = buildChatHistory(messages);
-    const userMessageId = nextId();
+    const controller = new AbortController();
+    activeRequestRef.current = controller;
+    const speechRequestId = speechRequestIdRef.current + 1;
+    speechRequestIdRef.current = speechRequestId;
+    pendingQuestionRef.current = text;
+    setRequestNotice("");
+    setRetryQuestion("");
+    const retryMessageId = pendingUserMessageIdRef.current;
+    const history = buildChatHistory(messages.filter((entry) => entry.id !== retryMessageId));
+    const userMessageId = retryMessageId ?? nextId();
+    pendingUserMessageIdRef.current = userMessageId;
     const shouldReadTypedQuestion = readAloud && !options.continueConversation;
     const shouldUnlockTts =
       ttsSupported && (isAutoTtsEnabled || shouldReadTypedQuestion || options.continueConversation);
@@ -561,70 +632,45 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
     abortVoiceInput();
     stopSpeech();
     const ttsUnlockPromise = shouldUnlockTts ? unlockTts() : Promise.resolve(true);
-    setMessages((current) => [...current, { id: userMessageId, role: "user", text }]);
+    setMessages((current) => [
+      ...current.filter((entry) => entry.id !== retryMessageId),
+      { id: userMessageId, role: "user", text }
+    ]);
     setInput("");
     isLoadingRef.current = true;
     setIsLoading(true);
 
-    const ttsUnlocked = await ttsUnlockPromise;
-    if (shouldUnlockTts && !ttsUnlocked) {
-      setVoiceInputStatus(
-        "브라우저에서 자동 읽기를 시작하지 못했어요. 답변의 읽기 버튼을 눌러주세요."
-      );
-    } else if (shouldReadTypedQuestion && ttsSupported) {
-      startSpeech(userMessageId, text);
-    }
+    void (async () => {
+      const ttsUnlocked = await ttsUnlockPromise;
+      if (speechRequestIdRef.current !== speechRequestId || controller.signal.aborted) return;
+      if (shouldUnlockTts && !ttsUnlocked) {
+        setVoiceInputStatus(
+          "브라우저에서 자동 읽기를 시작하지 못했어요. 답변의 읽기 버튼을 눌러주세요."
+        );
+      } else if (shouldReadTypedQuestion && ttsSupported) {
+        startSpeech(userMessageId, text);
+      }
+    })().catch(() => {
+      if (speechRequestIdRef.current === speechRequestId && !controller.signal.aborted) {
+        setVoiceInputStatus("음성 재생을 준비하지 못했어요. 답변의 읽기 버튼을 눌러주세요.");
+      }
+    });
 
     try {
-      const response = await fetch("/api/chat", {
+      const data = await requestChatJson<ChatResponse>("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, accessibilityNeeds, history })
+        body: JSON.stringify({ message: text, accessibilityNeeds, history }),
+        signal: controller.signal
       });
-
-      if (!response.ok) {
-        const errorMessage = await readChatErrorMessage(response);
-        throw new Error(errorMessage || "chat request failed");
-      }
-
-      let data = (await response.json()) as ChatResponse;
-      const contentIds = (data.places ?? []).flatMap((place) =>
-        place.contentId ? [place.contentId] : []
-      );
-      const courseRequested = isCourseRecommendationRequest(text);
-
-      if (contentIds.length || courseRequested) {
-        try {
-          const relatedResponse = await fetch(buildRelatedCourseQuery(contentIds), {
-            credentials: "same-origin",
-            cache: "no-store"
-          });
-          const relatedPayload = relatedResponse.ok
-            ? ((await relatedResponse.json()) as { items?: TourismSharedCourse[] })
-            : null;
-          let courses = relatedPayload?.items ?? [];
-
-          if (!courses.length && courseRequested && contentIds.length) {
-            const fallbackResponse = await fetch(buildRelatedCourseQuery([]), {
-              credentials: "same-origin",
-              cache: "no-store"
-            });
-            const fallbackPayload = fallbackResponse.ok
-              ? ((await fallbackResponse.json()) as { items?: TourismSharedCourse[] })
-              : null;
-            courses = fallbackPayload?.items ?? [];
-          }
-
-          if (courses.length) data = { ...data, courses };
-        } catch {
-          // 코스 연결 실패가 장소 답변까지 막지 않게 한다.
-        }
-      }
+      if (activeRequestRef.current !== controller || controller.signal.aborted) return;
+      pendingUserMessageIdRef.current = null;
       const assistantMessageId = nextId();
       setMessages((current) => [
         ...current,
         { id: assistantMessageId, role: "assistant", content: data }
       ]);
+      void loadRelatedCourses(assistantMessageId, data, text);
 
       if (options.continueConversation && conversationModeRef.current) {
         startSpeech(assistantMessageId, data.message, () => {
@@ -634,35 +680,22 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
         });
       }
     } catch (error) {
-      const errorMessageId = nextId();
-      const errorResponse: ChatResponse = {
-        message:
-          error instanceof Error && error.message && error.message !== "chat request failed"
-            ? error.message
-            : "응답을 만드는 중 문제가 생겼어요. 잠시 뒤 다시 질문해 주세요.",
-        chips: ["한밭수목원 휠체어 가능해?", "성심당 갈 수 있어?"],
-        confidence: "low",
-        sources: []
-      };
-      setMessages((current) => [
-        ...current,
-        {
-          id: errorMessageId,
-          role: "assistant",
-          content: errorResponse
-        }
-      ]);
-
-      if (options.continueConversation && conversationModeRef.current) {
-        startSpeech(errorMessageId, errorResponse.message, () => {
-          if (conversationModeRef.current) {
-            scheduleConversationListening(900);
-          }
-        });
-      }
+      if (activeRequestRef.current !== controller || controller.signal.aborted) return;
+      const notice =
+        error instanceof Error ? error.message : "답변을 받지 못했어요. 다시 시도해 주세요.";
+      setRequestNotice(notice);
+      setRetryQuestion(text);
+      setInput(text);
+      conversationModeRef.current = false;
+      setIsConversationMode(false);
+      clearConversationRestartTimer();
+      stopSpeech();
     } finally {
-      isLoadingRef.current = false;
-      setIsLoading(false);
+      if (activeRequestRef.current === controller) {
+        activeRequestRef.current = null;
+        isLoadingRef.current = false;
+        setIsLoading(false);
+      }
     }
   }
 
@@ -672,6 +705,11 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
   }
 
   function closeChat() {
+    activeRequestRef.current?.abort();
+    activeRequestRef.current = null;
+    speechRequestIdRef.current += 1;
+    for (const controller of relatedRequestsRef.current) controller.abort();
+    relatedRequestsRef.current.clear();
     conversationModeRef.current = false;
     setIsConversationMode(false);
     clearConversationRestartTimer();
@@ -815,6 +853,21 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
             </div>
           );
         })}
+        {requestNotice && (
+          <div className="border-hairline rounded-lg border bg-gray-50 p-3">
+            <p role="status" className="text-ink text-sm leading-relaxed">
+              {requestNotice}
+            </p>
+            <button
+              type="button"
+              onClick={() => void sendMessage(retryQuestion)}
+              disabled={isLoading || !retryQuestion}
+              className="border-hairline text-ink mt-2 min-h-11 rounded-md border bg-white px-4 text-sm font-semibold disabled:opacity-40"
+            >
+              같은 질문 다시 시도
+            </button>
+          </div>
+        )}
         {isLoading ? (
           <div className="flex items-end gap-2.5">
             <DaiyuAvatar />
@@ -823,6 +876,13 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
               <span className="bg-brand-500 h-2 w-2 animate-bounce rounded-full [animation-delay:-0.1s]" />
               <span className="bg-brand-500 h-2 w-2 animate-bounce rounded-full" />
             </div>
+            <button
+              type="button"
+              onClick={cancelRequest}
+              className="border-hairline text-steel min-h-11 rounded-md border bg-white px-3 text-sm font-medium"
+            >
+              답변 요청 취소
+            </button>
           </div>
         ) : null}
       </div>

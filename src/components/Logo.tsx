@@ -9,6 +9,7 @@ export default function Logo({ compact = false }: { compact?: boolean }) {
   return (
     <Link
       href="/"
+      replace
       className="group flex shrink-0 items-center gap-2.5"
       aria-label="다대유 - 대전 무장애 여행 홈"
     >
