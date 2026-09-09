@@ -81,6 +81,13 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  // QA 테스트 전용: 첨부 insert 실패 시나리오 재현용 훅. 운영 환경에서는 동작하지 않는다.
+  // 사용법: fetch(`/api/community/board-posts?debugFailAttachment=images`, { method: "POST", ... })
+  const debugFailAttachment =
+    process.env.NODE_ENV !== "production"
+      ? new URL(request.url).searchParams.get("debugFailAttachment")
+      : null;
+
   try {
     const supabase = await createClient();
     const {
@@ -198,22 +205,30 @@ export async function POST(request: Request) {
     if (error) throw error;
 
     if (images.length > 0) {
-      await supabase
-        .from("tb_post_image")
-        .insert(
-          images.map((image_url, i) => ({ post_id: data.post_id, image_url, sort_order: i }))
-        );
+      const { error: imagesError } =
+        debugFailAttachment === "images"
+          ? { error: new Error("[QA 테스트] 이미지 저장 강제 실패") }
+          : await supabase
+              .from("tb_post_image")
+              .insert(
+                images.map((image_url, i) => ({ post_id: data.post_id, image_url, sort_order: i }))
+              );
+      if (imagesError) throw imagesError;
     }
     if (files.length > 0) {
-      await supabase.from("tb_post_file").insert(
-        files.map((f, i) => ({
-          post_id: data.post_id,
-          file_url: f.url,
-          file_name: f.name,
-          file_size: f.size ?? null,
-          sort_order: i
-        }))
-      );
+      const { error: filesError } =
+        debugFailAttachment === "files"
+          ? { error: new Error("[QA 테스트] 파일 저장 강제 실패") }
+          : await supabase.from("tb_post_file").insert(
+              files.map((f, i) => ({
+                post_id: data.post_id,
+                file_url: f.url,
+                file_name: f.name,
+                file_size: f.size ?? null,
+                sort_order: i
+              }))
+            );
+      if (filesError) throw filesError;
     }
 
     try {

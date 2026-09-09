@@ -20,6 +20,20 @@ export function formatCommunityDateTime(iso: string | null | undefined): string 
   return `${yyyy}.${mm}.${dd} ${hh}:${min}`;
 }
 
+// 화면 읽어주기(TTS)용. "13:12"처럼 콜론/마침표로 된 표기는 브라우저 음성엔진이
+// 비율("13대12")이나 소수점으로 잘못 읽는 경우가 있어, "시/분" 단위를 풀어서 읽힌다.
+export function formatCommunityDateTimeForSpeech(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const yyyy = d.getFullYear();
+  const mm = d.getMonth() + 1;
+  const dd = d.getDate();
+  const hh = d.getHours();
+  const min = d.getMinutes();
+  return `${yyyy}년 ${mm}월 ${dd}일 ${hh}시 ${min}분`;
+}
+
 export function renderMultilineText(content: string) {
   return content.split(/\r?\n/).filter((line, i, arr) => line.length > 0 || i < arr.length - 1);
 }

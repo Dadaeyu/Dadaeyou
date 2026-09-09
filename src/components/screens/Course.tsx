@@ -42,6 +42,7 @@ import { Filters, DEFAULT_FILTERS, FilterFields, useFilters } from "@/components
 import PlaceSearchSidebar from "@/components/search/PlaceSearchSidebar";
 import TourismDetailPanel from "@/components/search/TourismDetailPanel";
 import type { SearchPlace } from "@/lib/search/kakaoSearch";
+import { buildPlaceRouteMapHref } from "@/lib/search/mapRouteHref";
 import { usePlaceSearch, type TourismDetail } from "@/hooks/usePlaceSearch";
 import {
   getCategoryColor,
@@ -2946,7 +2947,7 @@ function CourseDetail({ id }: { id: string }) {
             onBack={() => setPlaceSearchOpen(false)}
           />
         ) : selectedSearchPlace ? (
-          /* ── 지도 노드 클릭(장소 검색으로 추가된 항목) 상세 — 뒤로가기 시 코스 편집 패널로 바로 복귀 ── */
+          /* ── 코스 장소 상세(목록·마커). 보기 모드 경로안내는 지도에서 연다. 편집 중에는 끄고, 뒤로가면 코스 패널. ── */
           <TourismDetailPanel
             sp={
               {
@@ -2963,6 +2964,18 @@ function CourseDetail({ id }: { id: string }) {
             detail={selectedSearchDetail}
             isLoading={selectedSearchDetailLoading}
             onBack={() => setSelectedSearchPlace(null)}
+            onBeginRoute={
+              !isEditing && selectedSearchPlace.contentId
+                ? () =>
+                    router.push(
+                      buildPlaceRouteMapHref({
+                        contentId: selectedSearchPlace.contentId ?? "",
+                        name: selectedSearchPlace.name,
+                        from: `/course/${id}`
+                      })
+                    )
+                : undefined
+            }
           />
         ) : isEditing ? (
           /* ── 편집 패널 ── */

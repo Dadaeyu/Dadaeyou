@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Heart, MapPin, Route, FileText, Pencil, Settings } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
-import { fetchFavorites } from "@/lib/supabase/favorites";
 import { fetchMyPlaceLikes } from "@/lib/supabase/place-likes";
 import { fetchMyCourseLikes, formatCoursePeriod } from "@/lib/supabase/course-likes";
 import { fetchMyCourses, courseDurationLabel, isCoursePublic } from "@/lib/supabase/courses";
@@ -25,13 +24,11 @@ import {
   nextLevelThreshold
 } from "@/lib/community/levels";
 import { CommunityLevelBadge } from "@/components/community/CommunityLevelBadge";
-import { usePlaces } from "@/context/PlacesContext";
 
-type TabKey = "likes" | "saved" | "courses" | "posts" | "reports";
+type TabKey = "likes" | "courses" | "posts" | "reports";
 
 export default function MyPage() {
   const { user, member, preferences, loading: authLoading, refreshMember } = useAuth();
-  const { places } = usePlaces();
 
   const gender = member ? (genderToLabel(member.gender) as "남성" | "여성" | "비공개") : "비공개";
   const age = member ? ageGroupToLabel(member.age_group) : "비공개";
@@ -40,11 +37,8 @@ export default function MyPage() {
 
   const [activeTab, setActiveTab] = useState<TabKey>("likes");
   const [likesSubTab, setLikesSubTab] = useState<"places" | "courses">("places");
-  const [savedSubTab, setSavedSubTab] = useState<"places" | "courses">("places");
   const [likedPlaces, setLikedPlaces] = useState<LikedPlace[]>([]);
   const [likedCourses, setLikedCourses] = useState<LikedCourse[]>([]);
-  const [savedPlaceIds, setSavedPlaceIds] = useState<number[]>([]);
-  const [savedCourseIds, setSavedCourseIds] = useState<number[]>([]);
   const [myCourses, setMyCourses] = useState<TourismMyCourse[]>([]);
   const [myPosts, setMyPosts] = useState<DbCommunityPost[]>([]);
   const [reports, setReports] = useState<DbPlaceReport[]>([]);
@@ -62,8 +56,6 @@ export default function MyPage() {
       const settled = await Promise.allSettled([
         fetchMyPlaceLikes(user.id),
         fetchMyCourseLikes(user.id),
-        fetchFavorites(user.id, "place"),
-        fetchFavorites(user.id, "course"),
         fetchMyCourses(user.id),
         fetchMyPosts(user.id),
         fetchMyReports(user.id),
@@ -78,16 +70,10 @@ export default function MyPage() {
 
       setLikedPlaces(value(0, []));
       setLikedCourses(value(1, []));
-      setSavedPlaceIds(
-        value(2, [] as Awaited<ReturnType<typeof fetchFavorites>>).map((f) => f.target_id)
-      );
-      setSavedCourseIds(
-        value(3, [] as Awaited<ReturnType<typeof fetchFavorites>>).map((f) => f.target_id)
-      );
-      setMyCourses(value(4, []));
-      setMyPosts(value(5, []));
-      setReports(value(6, []));
-      const pointsRes = value(7, {} as { items?: typeof pointEvents });
+      setMyCourses(value(2, []));
+      setMyPosts(value(3, []));
+      setReports(value(4, []));
+      const pointsRes = value(5, {} as { items?: typeof pointEvents });
       setPointEvents(pointsRes.items ?? []);
     } finally {
       setDataLoading(false);
@@ -98,7 +84,6 @@ export default function MyPage() {
     if (user) queueMicrotask(() => void loadData());
   }, [user, loadData]);
 
-  const savedPlaces = places.filter((p) => savedPlaceIds.includes(p.id));
   const level = member?.community_level ?? 1;
   const levelMeta = getCommunityLevelMeta(level);
   const points = member?.community_points ?? 0;
@@ -107,8 +92,7 @@ export default function MyPage() {
     nextLevelAt == null ? 100 : Math.min(100, Math.round((points / nextLevelAt) * 100));
 
   const tabs: { key: TabKey; label: string; count: number }[] = [
-    { key: "likes", label: "좋아요", count: likedPlaces.length + likedCourses.length },
-    { key: "saved", label: "즐겨찾기", count: savedPlaceIds.length + savedCourseIds.length },
+    { key: "likes", label: "즐겨찾기", count: likedPlaces.length + likedCourses.length },
     { key: "courses", label: "내 코스", count: myCourses.length },
     { key: "posts", label: "내 글", count: myPosts.length },
     { key: "reports", label: "제보 이력", count: reports.length }
@@ -338,7 +322,7 @@ export default function MyPage() {
                 ))}
                 {likedPlaces.length === 0 && (
                   <p className="col-span-full py-8 text-center text-sm text-gray-400">
-                    좋아요한 장소가 없어요
+                    즐겨찾기한 장소가 없어요
                   </p>
                 )}
               </div>
@@ -371,93 +355,7 @@ export default function MyPage() {
                 })}
                 {likedCourses.length === 0 && (
                   <p className="col-span-full py-8 text-center text-sm text-gray-400">
-                    좋아요한 코스가 없어요
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {!dataLoading && activeTab === "saved" && (
-          <div className="space-y-4">
-            <div className="flex w-fit gap-1 rounded-xl bg-gray-100 p-1">
-              {[
-                { key: "places" as const, label: "장소", count: savedPlaces.length },
-                { key: "courses" as const, label: "코스", count: savedCourseIds.length }
-              ].map(({ key, label, count }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setSavedSubTab(key)}
-                  className={`flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
-                    savedSubTab === key
-                      ? "bg-white text-gray-800 shadow-sm"
-                      : "text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  {label}
-                  <span
-                    className={`rounded-full px-1.5 py-0.5 text-xs ${
-                      savedSubTab === key
-                        ? "bg-brand-100 text-brand-700"
-                        : "bg-gray-200 text-gray-500"
-                    }`}
-                  >
-                    {count}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            {savedSubTab === "places" && (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {savedPlaces.map((place) => (
-                  <Link
-                    key={place.id}
-                    href={`/map?place=${place.id}`}
-                    className="border-hairline flex items-center justify-between rounded-xl border bg-white p-4 transition-shadow hover:shadow-md"
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="bg-brand-50 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xl">
-                        {place.emoji}
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="truncate font-semibold text-gray-800">{place.name}</h4>
-                        <p className="mt-0.5 text-xs text-gray-500">{place.category}</p>
-                      </div>
-                    </div>
-                    <Heart className="h-3.5 w-3.5 shrink-0 fill-red-400 text-red-400" />
-                  </Link>
-                ))}
-                {savedPlaces.length === 0 && (
-                  <p className="col-span-full py-8 text-center text-sm text-gray-400">
-                    저장한 장소가 없어요
-                  </p>
-                )}
-              </div>
-            )}
-
-            {savedSubTab === "courses" && (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {savedCourseIds.map((id) => (
-                  <Link
-                    key={id}
-                    href={`/course/${id}`}
-                    className="border-hairline rounded-xl border bg-white p-4 transition-shadow hover:shadow-md"
-                  >
-                    <div className="mb-2.5 flex items-center gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-purple-50">
-                        <Route className="h-5 w-5 text-purple-500" />
-                      </div>
-                      <h4 className="truncate font-semibold text-gray-800">코스 #{id}</h4>
-                    </div>
-                    <Heart className="h-3.5 w-3.5 fill-red-400 text-red-400" />
-                  </Link>
-                ))}
-                {savedCourseIds.length === 0 && (
-                  <p className="col-span-full py-8 text-center text-sm text-gray-400">
-                    저장한 코스가 없어요
+                    즐겨찾기한 코스가 없어요
                   </p>
                 )}
               </div>

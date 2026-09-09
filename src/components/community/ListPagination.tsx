@@ -36,7 +36,12 @@ export function ListPagination({
       >
         <ChevronLeft className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
       </Button>
-      <span className={`text-stone ${compact ? "text-xs" : "text-sm"}`}>
+      <span
+        className={`text-stone ${compact ? "text-xs" : "text-sm"}`}
+        data-speakable="true"
+        tabIndex={0}
+        aria-label={`현재 ${page + 1}페이지, 총 ${pages}페이지`}
+      >
         {page + 1} / {pages}
       </span>
       <Button

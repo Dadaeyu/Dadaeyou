@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
@@ -17,7 +18,6 @@ import {
   Phone,
   Footprints,
   Car,
-  X,
   Loader2
 } from "lucide-react";
 import type { SearchPlace } from "@/lib/search/kakaoSearch";
@@ -26,6 +26,8 @@ import { formatHomeEventPeriod } from "@/features/home/homePresentation";
 import AccessibilitySection from "./AccessibilitySection";
 import { useAuth } from "@/context/AuthContext";
 import { isPlaceLiked } from "@/lib/supabase/placeLikes";
+import { requireLoginOrRedirect } from "@/lib/auth/require-login-redirect";
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type { RouteMode, RouteOption } from "@/lib/kakao/directions";
 import {
   formatRouteDistance,
@@ -34,6 +36,11 @@ import {
 } from "@/lib/kakao/directions";
 import RouteOptionPicker from "./RouteOptionPicker";
 import TrafficLegend from "./TrafficLegend";
+import { type RouteOriginPlace } from "./OriginPlacePicker";
+import RouteEndpointsCard from "./RouteEndpointsCard";
+
+export type { RouteOriginPlace };
+export type RouteOriginPhase = "idle" | "searching" | "picked";
 
 const REVIEW_PREVIEW_LENGTH = 60;
 // 리뷰로 취급하는 게시판("후기")의 board_id.
@@ -85,6 +92,18 @@ function formatUseTime(text: string): string {
     .replace(/(\d{2}:\d{2})\[/g, "$1\n[");
 }
 
+// restdate 원문도 usetime과 같은 API에서 오며 "<br>"/"-"로 여러 항목이 이어붙어 있거나
+// "매주 월요일/명절 당일"처럼 "/"로 구분돼 있어 formatUseTime과 같은 방식으로 줄바꿈한다.
+// 쉼표(예: "2,4주")는 같은 항목 안의 목록이라 줄바꿈하지 않는다.
+function formatRestDate(text: string): string {
+  return text
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/^\s*-\s*/, "")
+    .replace(/-\s*(?=[가-힣※\[])/g, "\n")
+    .replace(/※/g, "\n※")
+    .replace(/\s*\/\s*/g, "\n");
+}
+
 // 지도·코스 검색 결과 상세 패널 — DB(tb_place) 출처와 카카오 로컬 검색 출처를 함께 다룬다.
 // DB 출처: usePlaceSearch()의 tourismDetail 을 받아 실제 리뷰·접근성·상세내용을 보여준다.
 // 카카오 출처(sp.source==="kakao"): DB 상세가 없으므로 좋아요 영속화·리뷰 작성 없이
@@ -113,6 +132,12 @@ export default function TourismDetailPanel({
   onLikeChange,
   onAddToCourse,
   onStartRoute,
+  onBeginRoute,
+  routeOrigin = null,
+  routeOriginPhase = "idle",
+  onPickOrigin,
+  onChangeOrigin,
+  onDismissRoute,
   routeGuide
 }: {
   sp: SearchPlace;
@@ -122,20 +147,34 @@ export default function TourismDetailPanel({
   onLikeChange?: () => void;
   onAddToCourse?: () => void; // 넘기면 헤더에 "내 코스에 추가" 버튼 표시 (코스 편집 화면 전용)
   onStartRoute?: (mode: RouteMode) => void;
+  onBeginRoute?: () => void;
+  routeOrigin?: RouteOriginPlace | null;
+  routeOriginPhase?: RouteOriginPhase;
+  onPickOrigin?: (place: RouteOriginPlace) => void;
+  onChangeOrigin?: () => void;
+  onDismissRoute?: () => void;
   routeGuide?: PlaceRouteGuideState | null;
 }) {
   const router = useRouter();
   const { user } = useAuth();
+  const { confirm: dialogConfirm, dialog: loginDialog } = useConfirmDialog();
   const isKakao = sp.source === "kakao";
   const [favorited, setFavorited] = useState(false);
   const [loginNotice, setLoginNotice] = useState(false);
+  const [favoriteError, setFavoriteError] = useState<string | null>(null);
+  const favoriteErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [favoriteSuccessMessage, setFavoriteSuccessMessage] = useState<string | null>(null);
+  const favoriteSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [overviewExpanded, setOverviewExpanded] = useState(false);
   const [reviewTotal, setReviewTotal] = useState(0);
   const [averageRating, setAverageRating] = useState<number | null>(null);
   const [reviews, setReviews] = useState<PlaceReviewItem[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(true);
-  const [routeModeOpen, setRouteModeOpen] = useState(false);
+  const canStartRoute = Boolean(onBeginRoute);
+  const routePanelOpen =
+    canStartRoute &&
+    (routeOriginPhase === "searching" || routeOriginPhase === "picked" || Boolean(routeGuide));
   const routeModePanelRef = useRef<HTMLDivElement | null>(null);
   const routeGuidePanelRef = useRef<HTMLDivElement | null>(null);
   const prevRouteGuideRef = useRef(false);
@@ -143,14 +182,14 @@ export default function TourismDetailPanel({
   // 카카오 출처는 contentid 가 없어(예: "kakao_123") 좋아요/리뷰 API 대상이 될 수 없다.
   const placeId = isKakao ? null : Number(sp.id);
 
-  // 모바일 하단 시트에서 이동수단 선택 패널이 화면 밖으로 밀리지 않도록 스크롤한다.
+  // 모바일 하단 시트에서 출발지 검색·수단 선택 패널이 화면 밖으로 밀리지 않도록 스크롤한다.
   useEffect(() => {
-    if (!routeModeOpen) return;
+    if (!routePanelOpen) return;
     const frame = window.requestAnimationFrame(() => {
       routeModePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [routeModeOpen]);
+  }, [routePanelOpen, routeOriginPhase]);
 
   // 경로 결과(로딩 포함)가 새로 열릴 때도 시트 안으로 맞춰 사용자가 인지하게 한다.
   useEffect(() => {
@@ -201,9 +240,14 @@ export default function TourismDetailPanel({
     };
   }, [sp.id, isKakao]);
 
-  const goWriteReview = () => {
+  const goWriteReview = async () => {
     const params = new URLSearchParams({ contentId: sp.id, board: String(REVIEW_BOARD_ID) });
-    router.push(`/community/new?${params}`);
+    const nextPath = `/community/new?${params}`;
+    // 비로그인이면 로그인 화면으로 보내되, 장소/게시판 선택이 담긴 next 경로를 그대로 넘겨서
+    // 로그인 후 돌아왔을 때 다시 선택하지 않아도 되게 한다. 네이티브 confirm() 대신 앱 톤에 맞는
+    // 인앱 다이얼로그(useConfirmDialog)를 쓴다.
+    if (!(await requireLoginOrRedirect(user, router, nextPath, dialogConfirm))) return;
+    router.push(nextPath);
   };
 
   const goMoreReviews = () => {
@@ -231,29 +275,58 @@ export default function TourismDetailPanel({
     };
   }, [user, placeId, isKakao]);
 
+  useEffect(
+    () => () => {
+      if (favoriteErrorTimeoutRef.current) clearTimeout(favoriteErrorTimeoutRef.current);
+      if (favoriteSuccessTimeoutRef.current) clearTimeout(favoriteSuccessTimeoutRef.current);
+    },
+    []
+  );
+
   const handleToggleFavorite = async () => {
     if (!user) {
       setLoginNotice(true);
       setTimeout(() => setLoginNotice(false), 2000);
       return;
     }
+    if (favoriteErrorTimeoutRef.current) {
+      clearTimeout(favoriteErrorTimeoutRef.current);
+      favoriteErrorTimeoutRef.current = null;
+    }
+    if (favoriteSuccessTimeoutRef.current) {
+      clearTimeout(favoriteSuccessTimeoutRef.current);
+      favoriteSuccessTimeoutRef.current = null;
+    }
+    setFavoriteError(null);
     const next = !favorited;
     setFavorited(next);
     try {
-      const res = await fetch("/api/places/favorite", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ place_id: placeId })
-      });
+      let res: Response;
+      try {
+        res = await fetch("/api/places/favorite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ place_id: placeId })
+        });
+      } catch {
+        // fetch() 자체가 던지는 건 브라우저의 영어 네트워크 에러(예: "Failed to fetch")라
+        // 그대로 보여주지 않고 한글 메시지로 바꾼다.
+        throw new Error("네트워크 연결을 확인해주세요.");
+      }
       const json = (await res.json().catch(() => ({}))) as {
         favorited?: boolean;
         error?: string;
       };
-      if (!res.ok) throw new Error(json.error ?? "즐겨찾기 실패");
-      if (typeof json.favorited === "boolean") setFavorited(json.favorited);
+      if (!res.ok) throw new Error(json.error ?? "즐겨찾기 저장에 실패했습니다.");
+      const finalFavorited = typeof json.favorited === "boolean" ? json.favorited : next;
+      setFavorited(finalFavorited);
       onLikeChange?.();
-    } catch {
+      setFavoriteSuccessMessage(finalFavorited ? "즐겨찾기에 추가했어요" : "즐겨찾기를 해제했어요");
+      favoriteSuccessTimeoutRef.current = setTimeout(() => setFavoriteSuccessMessage(null), 2000);
+    } catch (error) {
       setFavorited(!next);
+      setFavoriteError(error instanceof Error ? error.message : "즐겨찾기 저장에 실패했습니다.");
+      favoriteErrorTimeoutRef.current = setTimeout(() => setFavoriteError(null), 4000);
     }
   };
 
@@ -277,7 +350,11 @@ export default function TourismDetailPanel({
         { label: "주소", value: detail?.addr1 || "-" },
         ...(isEvent ? [{ label: "기간", value: eventPeriod || "-" }] : []),
         { label: "시간", value: detail?.use_time ? formatUseTime(detail.use_time) : "-" },
-        ...(isEvent ? [] : [{ label: "휴무일", value: detail?.rest_date || "-" }]),
+        ...(isEvent
+          ? []
+          : [
+              { label: "휴무일", value: detail?.rest_date ? formatRestDate(detail.rest_date) : "-" }
+            ]),
         { label: "전화", value: detail?.phone || "-" }
       ];
 
@@ -376,15 +453,12 @@ export default function TourismDetailPanel({
             )}
             <button
               type="button"
-              onClick={() => {
-                if (!onStartRoute) return;
-                setRouteModeOpen((v) => !v);
-              }}
-              disabled={!onStartRoute}
-              aria-expanded={routeModeOpen}
+              onClick={() => onBeginRoute?.()}
+              disabled={!canStartRoute}
+              aria-expanded={routePanelOpen}
               aria-controls="route-mode-panel"
               className={`flex flex-col items-center gap-1 rounded-xl border py-2.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                routeModeOpen
+                routePanelOpen
                   ? "border-blue-300 bg-blue-50 text-blue-700"
                   : "border-gray-200 text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
               }`}
@@ -394,114 +468,139 @@ export default function TourismDetailPanel({
             </button>
           </div>
 
-          {routeModeOpen && onStartRoute ? (
-            <div
-              id="route-mode-panel"
-              ref={routeModePanelRef}
-              className="border-brand-200 bg-brand-50/50 animate-in fade-in slide-in-from-top-1 space-y-2 rounded-xl border p-3 shadow-sm"
-            >
-              <p className="text-ink text-xs font-semibold">이동 수단을 선택하세요</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRouteModeOpen(false);
-                    onStartRoute("walk");
-                  }}
-                  className="border-hairline hover:border-brand-300 hover:bg-background flex items-center justify-center gap-1.5 rounded-lg border bg-white px-3 py-2.5 text-xs font-semibold text-gray-700"
+          {canStartRoute && routePanelOpen ? (
+            <div id="route-mode-panel" ref={routeModePanelRef}>
+              <div ref={routeGuidePanelRef}>
+                <RouteEndpointsCard
+                  destinationName={title}
+                  origin={routeOrigin}
+                  searching={routeOriginPhase === "searching"}
+                  onPickOrigin={onPickOrigin}
+                  onChangeOrigin={onChangeOrigin}
+                  onClose={onDismissRoute ?? routeGuide?.onClear}
                 >
-                  <Footprints className="h-3.5 w-3.5" />
-                  도보
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRouteModeOpen(false);
-                    onStartRoute("car");
-                  }}
-                  className="border-hairline hover:border-brand-300 hover:bg-background flex items-center justify-center gap-1.5 rounded-lg border bg-white px-3 py-2.5 text-xs font-semibold text-gray-700"
-                >
-                  <Car className="h-3.5 w-3.5" />
-                  자동차
-                </button>
+                  {routeOriginPhase === "picked" && routeOrigin && !routeGuide ? (
+                    <div className="space-y-2">
+                      <p className="text-ink text-xs font-semibold">이동 수단</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onStartRoute?.("walk")}
+                          className="border-hairline hover:border-brand-300 hover:bg-background flex items-center justify-center gap-1.5 rounded-xl border bg-white px-3 py-2.5 text-xs font-semibold text-gray-700"
+                        >
+                          <Footprints className="h-3.5 w-3.5" />
+                          도보
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onStartRoute?.("car")}
+                          className="border-hairline hover:border-brand-300 hover:bg-background flex items-center justify-center gap-1.5 rounded-xl border bg-white px-3 py-2.5 text-xs font-semibold text-gray-700"
+                        >
+                          <Car className="h-3.5 w-3.5" />
+                          자동차
+                        </button>
+                      </div>
+                    </div>
+                  ) : routeGuide ? (
+                    <div className="space-y-2">
+                      <p className="text-ink flex items-center gap-1.5 text-xs font-semibold">
+                        {routeGuide.loading ? (
+                          <Loader2 className="text-brand-700 h-3.5 w-3.5 shrink-0 animate-spin" />
+                        ) : null}
+                        {routeGuide.mode === "walk" ? "도보" : "자동차"}
+                        {routeGuide.loading ? " 경로를 찾는 중…" : " 경로"}
+                      </p>
+                      {!routeGuide.loading &&
+                      routeGuide.distanceM != null &&
+                      routeGuide.durationSec != null ? (
+                        <p className="text-ink text-sm font-semibold">
+                          {formatRouteDuration(routeGuide.durationSec)}
+                          <span className="text-stone ml-2 text-xs font-medium">
+                            {formatRouteDistance(routeGuide.distanceM)}
+                            {routeGuide.tollFare != null && routeGuide.tollFare > 0
+                              ? ` · ${formatRouteTollFare(routeGuide.tollFare)}`
+                              : ""}
+                          </span>
+                        </p>
+                      ) : null}
+                      {routeGuide.error ? (
+                        <p className="text-error text-xs">{routeGuide.error}</p>
+                      ) : null}
+                      {routeGuide.mode === "car" &&
+                      routeGuide.routeOptions &&
+                      routeGuide.routeOptions.length > 1 &&
+                      routeGuide.onSelectRoute ? (
+                        <RouteOptionPicker
+                          options={routeGuide.routeOptions}
+                          selectedId={
+                            routeGuide.selectedRouteId ?? routeGuide.routeOptions[0]?.id ?? "0"
+                          }
+                          onSelect={routeGuide.onSelectRoute}
+                          disabled={routeGuide.loading}
+                        />
+                      ) : null}
+                      {routeGuide.showTrafficLegend ? <TrafficLegend /> : null}
+                      <button
+                        type="button"
+                        disabled={routeGuide.loading}
+                        onClick={routeGuide.onOpenKakao}
+                        className="bg-brand-700 hover:bg-brand-800 w-full rounded-xl py-2.5 text-xs font-semibold text-white disabled:opacity-50"
+                      >
+                        카카오맵에서 안내 시작
+                      </button>
+                    </div>
+                  ) : null}
+                </RouteEndpointsCard>
               </div>
             </div>
           ) : null}
 
-          {routeGuide ? (
-            <div
-              ref={routeGuidePanelRef}
-              className="border-brand-200 bg-brand-50/60 space-y-2 rounded-xl border p-3"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-ink flex items-center gap-1.5 text-xs font-semibold">
-                    {routeGuide.loading ? (
-                      <Loader2 className="text-brand-700 h-3.5 w-3.5 shrink-0 animate-spin" />
-                    ) : null}
-                    {routeGuide.mode === "walk" ? "도보" : "자동차"} 경로
-                    {routeGuide.loading ? " 불러오는 중…" : ""}
-                  </p>
-                  {!routeGuide.loading &&
-                  routeGuide.distanceM != null &&
-                  routeGuide.durationSec != null ? (
-                    <p className="text-stone mt-0.5 text-xs">
-                      {formatRouteDistance(routeGuide.distanceM)} ·{" "}
-                      {formatRouteDuration(routeGuide.durationSec)}
-                      {routeGuide.tollFare != null && routeGuide.tollFare > 0
-                        ? ` · ${formatRouteTollFare(routeGuide.tollFare)}`
-                        : ""}
-                    </p>
-                  ) : null}
-                  {routeGuide.error ? (
-                    <p className="text-error mt-1 text-xs">{routeGuide.error}</p>
-                  ) : null}
-                </div>
-                <button
-                  type="button"
-                  onClick={routeGuide.onClear}
-                  className="text-stone hover:text-ink rounded-full p-1"
-                  aria-label="경로 안내 닫기"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              {routeGuide.mode === "car" &&
-              routeGuide.routeOptions &&
-              routeGuide.routeOptions.length > 1 &&
-              routeGuide.onSelectRoute ? (
-                <RouteOptionPicker
-                  options={routeGuide.routeOptions}
-                  selectedId={routeGuide.selectedRouteId ?? routeGuide.routeOptions[0]?.id ?? "0"}
-                  onSelect={routeGuide.onSelectRoute}
-                  disabled={routeGuide.loading}
-                />
-              ) : null}
-              {routeGuide.showTrafficLegend ? <TrafficLegend /> : null}
+          {/* 로그인 안내 토스트 — body에 직접 포탈해서, 시트 등 조상 요소의 transform 때문에
+              fixed 위치가 화면 중앙이 아니라 그 조상 기준으로 틀어지는 걸 막는다. */}
+          {loginNotice &&
+            createPortal(
+              <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full bg-gray-900 px-4 py-2.5 text-xs whitespace-nowrap text-white shadow-lg">
+                로그인 후 이용 가능합니다
+              </div>,
+              document.body
+            )}
+
+          {/* 즐겨찾기 저장 실패 안내 — 누르면 바로 재시도 */}
+          {favoriteError &&
+            createPortal(
               <button
                 type="button"
-                disabled={routeGuide.loading}
-                onClick={routeGuide.onOpenKakao}
-                className="bg-brand-700 hover:bg-brand-800 w-full rounded-lg py-2.5 text-xs font-semibold text-white disabled:opacity-50"
+                onClick={() => void handleToggleFavorite()}
+                className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full bg-gray-900 px-4 py-2.5 text-xs whitespace-nowrap text-white shadow-lg"
               >
-                카카오맵에서 안내 시작
-              </button>
-            </div>
-          ) : null}
+                {favoriteError} · 탭해서 다시 시도
+              </button>,
+              document.body
+            )}
 
-          {/* 로그인 안내 토스트 */}
-          {loginNotice && (
-            <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full bg-gray-900 px-4 py-2.5 text-xs whitespace-nowrap text-white shadow-lg">
-              로그인 후 이용 가능합니다
-            </div>
-          )}
+          {/* 즐겨찾기 저장 성공 토스트 */}
+          {favoriteSuccessMessage &&
+            !favoriteError &&
+            createPortal(
+              <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full bg-gray-900 px-4 py-2.5 text-xs whitespace-nowrap text-white shadow-lg">
+                {favoriteSuccessMessage}
+              </div>,
+              document.body
+            )}
 
           {/* 기본 정보 */}
           <div className="space-y-1.5 text-xs text-gray-600">
             {infoRows.map(({ label, value }) => (
               <div key={label} data-speakable className="flex gap-2">
                 <span className="w-12 shrink-0 font-medium text-gray-700">{label}</span>
-                <span className="min-w-0 break-words">{renderWithLineBreaks(value)}</span>
+                <span
+                  className="min-w-0 break-words"
+                  data-speakable="true"
+                  tabIndex={0}
+                  aria-label={`${label} ${value.replace(/<br\s*\/?>|\n/g, ", ")}`}
+                >
+                  {renderWithLineBreaks(value)}
+                </span>
               </div>
             ))}
           </div>
@@ -517,6 +616,12 @@ export default function TourismDetailPanel({
               <h4 className="mb-2 text-sm font-semibold text-gray-800">상세 내용</h4>
               <p
                 className={`text-sm leading-relaxed text-gray-600 ${overviewExpanded ? "" : "line-clamp-5"}`}
+                tabIndex={0}
+                aria-label={`상세내용 ${
+                  hasOverview
+                    ? decodeHtmlEntities((detail?.overview ?? "").replace(/<br\s*\/?>|\n/g, " "))
+                    : "없음"
+                }`}
               >
                 {hasOverview ? renderWithLineBreaks(detail?.overview ?? "") : "상세내용이 없습니다"}
               </p>
@@ -562,11 +667,18 @@ export default function TourismDetailPanel({
             <div>
               <div className="mb-3 flex items-center gap-2">
                 <MessageCircle className="h-4 w-4 text-gray-500" />
-                <h4 className="text-sm font-semibold text-gray-800">리뷰</h4>
+                <h4
+                  className="text-sm font-semibold text-gray-800"
+                  data-speakable="true"
+                  tabIndex={0}
+                  aria-label={`리뷰 ${reviewTotal}개`}
+                >
+                  리뷰
+                </h4>
                 <span className="text-xs text-gray-400">{reviewTotal}개</span>
                 <div className="ml-auto flex items-center gap-2">
                   <button
-                    onClick={goWriteReview}
+                    onClick={() => void goWriteReview()}
                     className="text-brand-600 hover:text-brand-800 flex items-center gap-1 text-xs font-medium transition-colors"
                   >
                     <PenLine className="h-3 w-3" />
@@ -592,6 +704,14 @@ export default function TourismDetailPanel({
                     <button
                       key={r.id}
                       onClick={() => router.push(`/community/${r.id}`)}
+                      aria-label={[
+                        r.title,
+                        r.rating != null ? `별점 ${r.rating}점` : null,
+                        r.content
+                      ]
+                        .filter(Boolean)
+                        .join(", ")}
+                      data-speakable="true"
                       className="block w-full rounded-xl border border-gray-100 p-3 text-left transition-colors hover:bg-gray-50"
                     >
                       <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -609,7 +729,7 @@ export default function TourismDetailPanel({
                           </div>
                         )}
                       </div>
-                      <p className="text-xs leading-relaxed text-gray-600">
+                      <p aria-hidden="true" className="text-xs leading-relaxed text-gray-600">
                         {r.content.length > REVIEW_PREVIEW_LENGTH
                           ? `${r.content.slice(0, REVIEW_PREVIEW_LENGTH)}...`
                           : r.content}
@@ -658,6 +778,7 @@ export default function TourismDetailPanel({
           </div>
         </div>
       )}
+      {loginDialog}
     </div>
   );
 }
