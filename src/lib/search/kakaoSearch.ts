@@ -27,12 +27,14 @@ export interface SearchPlace {
 export async function fetchKakaoPlaces(
   keyword: string,
   gu?: string,
-  dong?: string
+  dong?: string,
+  options?: { originSearch?: boolean }
 ): Promise<SearchPlace[]> {
   try {
     const params = new URLSearchParams({ query: keyword });
     if (gu) params.set("gu", gu);
     if (dong) params.set("dong", dong);
+    if (options?.originSearch) params.set("scope", "origin");
     const res = await fetch(`/api/kakao-search?${params}`);
     if (!res.ok) return [];
     const { documents } = await res.json();

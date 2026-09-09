@@ -1,6 +1,8 @@
 "use client";
 
 import { useAccessibility, FONT_SCALE_MIN, FONT_SCALE_MAX } from "@/context/AccessibilityContext";
+import { useAuth } from "@/context/AuthContext";
+import AccessibilityAccountSaveHint from "@/components/AccessibilityAccountSaveHint";
 
 const TOGGLES = [
   {
@@ -33,8 +35,11 @@ export function DisplaySettingsSection() {
     toggleHighContrast,
     toggleDarkMode,
     increaseFontScale,
-    decreaseFontScale
+    decreaseFontScale,
+    accountSaveStatus,
+    retryAccountSave
   } = useAccessibility();
+  const { user } = useAuth();
 
   const values = { readAloud, highContrast, darkMode };
   const toggles = {
@@ -45,7 +50,12 @@ export function DisplaySettingsSection() {
 
   return (
     <div className="max-w-xl space-y-2">
-      <p className="text-stone mb-3 text-xs">변경 내용은 바로 적용되며 계정에 저장됩니다.</p>
+      <AccessibilityAccountSaveHint
+        status={accountSaveStatus}
+        loggedIn={Boolean(user)}
+        saving={accountSaveStatus === "saving"}
+        onRetry={retryAccountSave}
+      />
 
       {TOGGLES.map(({ key, label, description, toggle }) => (
         <button

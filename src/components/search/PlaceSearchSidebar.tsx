@@ -9,7 +9,9 @@ import { Search, ChevronLeft } from "lucide-react";
 import { FilterToggleSection } from "@/components/search/FilterPanel";
 import SearchResultList from "@/components/search/SearchResultList";
 import TourismDetailPanel, {
-  type PlaceRouteGuideState
+  type PlaceRouteGuideState,
+  type RouteOriginPhase,
+  type RouteOriginPlace
 } from "@/components/search/TourismDetailPanel";
 import { ListPagination } from "@/components/community/ListPagination";
 import type { Filters } from "@/components/PlaceFilters";
@@ -58,6 +60,12 @@ interface Props {
 
   // 경로안내 (지도 탭)
   onStartRoute?: (mode: RouteMode) => void;
+  onBeginRoute?: () => void;
+  routeOrigin?: RouteOriginPlace | null;
+  routeOriginPhase?: RouteOriginPhase;
+  onPickOrigin?: (place: RouteOriginPlace) => void;
+  onChangeOrigin?: () => void;
+  onDismissRoute?: () => void;
   routeGuide?: PlaceRouteGuideState | null;
 
   // 사이드바 레벨 뒤로가기 (코스 편집 전용). 있으면 목록 상단에 뒤로 버튼.
@@ -92,6 +100,12 @@ export default function PlaceSearchSidebar({
   onLikeChange,
   detailAction,
   onStartRoute,
+  onBeginRoute,
+  routeOrigin,
+  routeOriginPhase,
+  onPickOrigin,
+  onChangeOrigin,
+  onDismissRoute,
   routeGuide,
   onBack
 }: Props) {
@@ -114,6 +128,12 @@ export default function PlaceSearchSidebar({
           onLikeChange={onLikeChange}
           onAddToCourse={detailAction}
           onStartRoute={onStartRoute}
+          onBeginRoute={onBeginRoute}
+          routeOrigin={routeOrigin}
+          routeOriginPhase={routeOriginPhase}
+          onPickOrigin={onPickOrigin}
+          onChangeOrigin={onChangeOrigin}
+          onDismissRoute={onDismissRoute}
           routeGuide={routeGuide}
         />
       </div>
