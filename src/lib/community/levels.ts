@@ -68,6 +68,12 @@ export function getCommunityLevelMeta(level: number | null | undefined): Communi
   return COMMUNITY_LEVEL_META[lv] ?? COMMUNITY_LEVEL_META[1];
 }
 
+/** 화면 읽어주기(TTS)용 등급 표기: "레벨 1 꿈누리" */
+export function formatCommunityLevelForSpeech(level: number | null | undefined): string {
+  const lv = clampCommunityLevel(level);
+  return `레벨 ${lv} ${COMMUNITY_LEVEL_LABELS[lv] ?? COMMUNITY_LEVEL_LABELS[1]}`;
+}
+
 export function nextLevelThreshold(level: number | null | undefined): number | null {
   const lv = clampCommunityLevel(level);
   if (lv >= COMMUNITY_MAX_LEVEL) return null;

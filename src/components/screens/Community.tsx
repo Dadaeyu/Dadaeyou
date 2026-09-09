@@ -33,6 +33,7 @@ import {
   formatCommunityDateTime,
   formatCommunityDateTimeForSpeech
 } from "@/lib/community/format";
+import { formatCommunityLevelForSpeech } from "@/lib/community/levels";
 import { COMMUNITY_DEFAULT_PAGE_SIZE, COMMUNITY_PAGE_SIZES } from "@/lib/pagination";
 import { ListPagination } from "@/components/community/ListPagination";
 import { useOptionalAuth } from "@/context/AuthContext";
@@ -1926,7 +1927,7 @@ function CommunityDetail({ id }: { id: string }) {
           className="border-hairline-soft space-y-3 border-b px-5 py-5 sm:px-7 sm:py-6"
           data-speakable="true"
           tabIndex={0}
-          aria-label={`${post.title}, 작성자 ${post.writer_nm}, ${formatCommunityDateTimeForSpeech(post.created_at)} 작성`}
+          aria-label={`${post.title}, ${formatCommunityLevelForSpeech(post.writer_community_level)}, 작성자 ${post.writer_nm}, ${formatCommunityDateTimeForSpeech(post.created_at)} 작성`}
         >
           <h1
             aria-hidden="true"
