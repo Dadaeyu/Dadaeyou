@@ -61,7 +61,7 @@ export function HomeDiscovery({ festivals, easyMode, onOpenFestival }: HomeDisco
           favoritePlaces?: Partial<HomeDiscoveryHotPlace>[];
         }>("/api/tourism/top-rated-places", controller.signal),
         fetchJson<{ items?: Partial<HomeDiscoveryCourse>[] }>(
-          "/api/courses/shared?limit=50&sort=rating_desc",
+          "/api/home/courses",
           controller.signal
         )
       ]);
