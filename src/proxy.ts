@@ -4,6 +4,7 @@ import { resolveAuthDestination } from "@/lib/auth/post-login";
 import { needsEmailConfirmation } from "@/lib/auth/user";
 import { isPublicLegalPath } from "@/lib/legal/legalRoutes";
 import { getPublicSupabaseConfig } from "@/lib/supabase/config";
+import { isPublicDataRequest } from "@/lib/auth/public-data-routes";
 
 const PROTECTED_PATHS = ["/mypage", "/onboarding"];
 const AUTH_PATHS = ["/login", "/signup", "/forgot-password"];
@@ -33,6 +34,8 @@ function isOnboardingExempt(pathname: string) {
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
   const pathname = request.nextUrl.pathname;
+  // Refreshing a session here can add Set-Cookie and disable the public CDN cache.
+  if (isPublicDataRequest(request.method, pathname)) return response;
   const config = getPublicSupabaseConfig();
 
   if (!config.isConfigured) return response;

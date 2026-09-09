@@ -17,9 +17,8 @@ export function HomeWeatherNotice({ easyMode = false }: { easyMode?: boolean }) 
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), HOME_WEATHER_TIMEOUT_MS);
 
-    fetch("/api/weather?location=%EB%8C%80%EC%A0%84", {
-      cache: "no-store",
-      credentials: "same-origin",
+    fetch("/api/weather?mode=current", {
+      credentials: "omit",
       signal: controller.signal
     })
       .then((response) => (response.ok ? response.json() : null))
