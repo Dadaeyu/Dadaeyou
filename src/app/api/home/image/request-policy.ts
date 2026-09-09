@@ -1,4 +1,9 @@
-export const ALLOWED_IMAGE_HOSTS = new Set(["tong.visitkorea.or.kr"]);
+import {
+  HOME_IMAGE_MAX_BYTES,
+  HOME_IMAGE_REMOTE_HOST
+} from "../../../../features/home/homeImage.ts";
+
+export const ALLOWED_IMAGE_HOSTS = new Set([HOME_IMAGE_REMOTE_HOST]);
 export const ALLOWED_IMAGE_CONTENT_TYPES = new Set([
   "image/avif",
   "image/bmp",
@@ -8,7 +13,7 @@ export const ALLOWED_IMAGE_CONTENT_TYPES = new Set([
   "image/png",
   "image/webp"
 ]);
-export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = HOME_IMAGE_MAX_BYTES;
 
 export type HomeImagePolicyFailure = {
   message: string;

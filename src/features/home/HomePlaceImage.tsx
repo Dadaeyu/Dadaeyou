@@ -1,9 +1,9 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element */
-
 import { MapPin } from "lucide-react";
+import Image from "next/image";
 import { useState } from "react";
+import { HOME_IMAGE_QUALITY, resolveHomeImageDelivery } from "@/features/home/homeImage";
 import { buildHomeFallbackCopy, normalizeHomeImageSource } from "@/features/home/homePresentation";
 
 export function HomePlaceImage({
@@ -82,14 +82,20 @@ export function HomePlaceImage({
     );
   }
 
+  const delivery = resolveHomeImageDelivery(activeSource);
+
   return (
-    <img
-      src={
-        activeSource.startsWith("/")
-          ? activeSource
-          : `/api/home/image?src=${encodeURIComponent(activeSource)}`
-      }
+    <Image
+      src={delivery.src}
       alt={alt}
+      fill
+      sizes={
+        compactFallback
+          ? "(max-width: 639px) 7.5rem, (max-width: 1023px) 25vw, 12rem"
+          : "(max-width: 639px) 100vw, (max-width: 1023px) 50vw, 33vw"
+      }
+      quality={HOME_IMAGE_QUALITY}
+      unoptimized={delivery.unoptimized}
       className={className}
       loading="lazy"
       decoding="async"
