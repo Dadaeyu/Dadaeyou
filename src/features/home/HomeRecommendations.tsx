@@ -6,7 +6,6 @@ import { ArrowRight, BadgeCheck, CircleAlert, Compass, RefreshCw } from "lucide-
 import { HomePlaceImage } from "@/features/home/HomePlaceImage";
 import {
   HOME_NEED_OPTIONS,
-  formatDistance,
   getConfirmedHomeEvidenceForNeeds,
   getHomeEvidenceStatus,
   getHomeRecommendationNeedIds,
@@ -254,7 +253,7 @@ function CuratedPlaces({
               ? undefined
               : hasEvidenceCondition
                 ? "선택한 조건이 공개 정보에서 확인된 장소만 모았어요."
-                : "사진과 위치, 확인된 방문 정보를 나란히 비교해 보세요."
+                : "사진과 주소, 확인된 방문 정보를 나란히 비교해 보세요."
           }
         />
         {hasMorePlaceGroups ? (
@@ -350,7 +349,6 @@ function FeaturedPlaceCard({
   cardIndex: number;
   disabled: boolean;
 }) {
-  const distance = formatDistance(place.distanceMeters);
   const visitInfo = summarizeVisitInfo(place);
   const fact = getPlaceDisplayFact(place, experience.selectedNeedIds, cardIndex);
   const titleId = `home-featured-place-${cardIndex}-title`;
@@ -391,13 +389,8 @@ function FeaturedPlaceCard({
             {place.title}
           </span>
           <span className="text-steel mt-2 block text-sm leading-6 sm:text-base">
-            {distance ? `${distance} 거리` : (visitInfo ?? place.address ?? "대전에서 만나는 장소")}
+            {visitInfo ?? place.address ?? "대전에서 만나는 장소"}
           </span>
-          {place.address && distance ? (
-            <span className="mt-1 line-clamp-1 text-xs text-slate-500 sm:text-sm">
-              {place.address}
-            </span>
-          ) : null}
 
           <span className="border-brand-100 bg-brand-50/75 mt-5 grid gap-2 rounded-xl border p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-3">
             <BadgeCheck className="text-brand-700 h-5 w-5" aria-hidden="true" />
@@ -417,8 +410,7 @@ function FeaturedPlaceCard({
             </span>
           </span>
           <span id={descriptionId} className="sr-only">
-            {place.category ?? "대전 여행"}. {distance ? `${distance} 거리. ` : ""}
-            {fact.label}. {fact.title}. {fact.detail}
+            {place.category ?? "대전 여행"}.{fact.label}. {fact.title}. {fact.detail}
           </span>
         </span>
       </button>
@@ -437,7 +429,6 @@ function SupportingPlaceCard({
   cardIndex: number;
   disabled: boolean;
 }) {
-  const distance = formatDistance(place.distanceMeters);
   const fact = getPlaceDisplayFact(place, experience.selectedNeedIds, cardIndex);
   const titleId = `home-supporting-place-${cardIndex}-title`;
   const descriptionId = `home-supporting-place-${cardIndex}-description`;
@@ -470,7 +461,7 @@ function SupportingPlaceCard({
             {place.title}
           </span>
           <span className="text-steel mt-1 block truncate text-xs">
-            {distance ? `${distance} 거리` : (place.address ?? "대전 여행")}
+            {place.address ?? "대전 여행"}
           </span>
           <span className="text-brand-800 mt-2 line-clamp-2 text-xs leading-5 font-semibold">
             <BadgeCheck className="mr-1 inline h-3.5 w-3.5 align-[-0.15em]" aria-hidden="true" />
@@ -505,7 +496,6 @@ function CompactPlaceCard({
   easyMode: boolean;
   disabled: boolean;
 }) {
-  const distance = formatDistance(place.distanceMeters);
   const visitInfo = summarizeVisitInfo(place);
   const fact = getPlaceDisplayFact(place, experience.selectedNeedIds, cardIndex);
   const titleId = `home-place-${cardIndex}-title`;
@@ -546,7 +536,7 @@ function CompactPlaceCard({
           <span
             className={`text-steel mt-1 block ${easyMode ? "text-base" : "text-xs sm:mt-1.5 sm:text-sm"}`}
           >
-            {distance ? `${distance} 거리` : (visitInfo ?? "대전에서 만나는 장소")}
+            {visitInfo ?? "대전에서 만나는 장소"}
           </span>
 
           <span
@@ -583,8 +573,7 @@ function CompactPlaceCard({
             />
           </span>
           <span id={descriptionId} className="sr-only">
-            {place.category ?? "대전 여행"}. {distance ? `${distance} 거리. ` : ""}
-            {fact.label}. {fact.title}. {fact.detail}
+            {place.category ?? "대전 여행"}.{fact.label}. {fact.title}. {fact.detail}
           </span>
         </span>
       </button>
@@ -632,7 +621,7 @@ function getPlaceDisplayFact(
   }
 
   if (place.address) {
-    return { label: "위치 정보", title: "주소 확인 가능", detail: place.address };
+    return { label: "주소 정보", title: "주소 확인 가능", detail: place.address };
   }
 
   return {

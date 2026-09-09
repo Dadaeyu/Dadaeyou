@@ -7,7 +7,6 @@ import {
   selectHomeFestivals,
   selectHomePlacesForDisplay,
   type HomeDataResponse,
-  type HomeLocation,
   type HomeNeedId,
   type HomePlace
 } from "@/features/home/homeData";
@@ -39,13 +38,11 @@ export class HomeDataError extends Error {
 
 export async function loadHomePlaces({
   needIds,
-  location,
   query,
   recommendationSeed,
   excludedPlaceIds
 }: {
   needIds: HomeNeedId[];
-  location: HomeLocation | null;
   query: string;
   recommendationSeed?: number;
   excludedPlaceIds?: readonly string[];
@@ -55,10 +52,8 @@ export async function loadHomePlaces({
     return { places: [], festivals: [], source: "한국관광공사 관광정보·무장애 여행정보" };
   }
 
-  const rankedPlaces = rankHomePlaces(normalizedPlaces, needIds, location, query);
-  const discoveryPlaces = needIds.length
-    ? rankHomePlaces(normalizedPlaces, [], location, "")
-    : rankedPlaces;
+  const rankedPlaces = rankHomePlaces(normalizedPlaces, needIds, query);
+  const discoveryPlaces = needIds.length ? rankHomePlaces(normalizedPlaces, [], "") : rankedPlaces;
   const visitPlaces = rankedPlaces.filter(
     (place) => place.category !== "축제·행사" && place.category !== "여행코스"
   );

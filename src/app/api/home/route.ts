@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import {
   HOME_NEED_OPTIONS,
   getHomeRecommendationNeedIds,
-  type HomeLocation,
   type HomeNeedId
 } from "@/features/home/homeData";
 import { HomeDataError, loadHomePlaces } from "@/features/home/server/loadHomePlaces";
@@ -10,7 +9,6 @@ import { parseHomeExcludedPlaceIds, parseHomeRecommendationSeed } from "./reques
 
 export const dynamic = "force-dynamic";
 
-const DAEJEON_BOUNDS = { minLat: 36.05, maxLat: 36.55, minLng: 127.15, maxLng: 127.65 };
 const allowedNeedIds = new Set<HomeNeedId>(HOME_NEED_OPTIONS.map((option) => option.id));
 
 export async function GET(request: Request) {
@@ -21,14 +19,12 @@ export async function GET(request: Request) {
       .split(",")
       .filter((value): value is HomeNeedId => allowedNeedIds.has(value as HomeNeedId))
   );
-  const location = parseLocation(searchParams.get("lat"), searchParams.get("lng"));
   const recommendationSeed = parseHomeRecommendationSeed(searchParams.get("seed"));
   const excludedPlaceIds = parseHomeExcludedPlaceIds(searchParams.getAll("exclude"));
 
   try {
     const data = await loadHomePlaces({
       needIds,
-      location,
       query,
       recommendationSeed,
       excludedPlaceIds
@@ -52,19 +48,4 @@ export async function GET(request: Request) {
       { status: 503 }
     );
   }
-}
-
-function parseLocation(latValue: string | null, lngValue: string | null): HomeLocation | null {
-  const lat = Number(latValue);
-  const lng = Number(lngValue);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  if (
-    lat < DAEJEON_BOUNDS.minLat ||
-    lat > DAEJEON_BOUNDS.maxLat ||
-    lng < DAEJEON_BOUNDS.minLng ||
-    lng > DAEJEON_BOUNDS.maxLng
-  ) {
-    return null;
-  }
-  return { lat, lng };
 }
