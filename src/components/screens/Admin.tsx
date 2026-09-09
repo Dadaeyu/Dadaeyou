@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PointerEvent as ReactPointerEvent
+} from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
@@ -62,6 +68,70 @@ const SECTIONS: SidebarSection[] = [
   { key: "reports", label: "제보 확인", icon: Flag }
 ];
 
+// ── 수동 API 동기화 — 완료(notDone=false)될 때까지 자동 반복 호출 ──
+// 스케줄러는 서버가 스스로 체이닝하지만, 관리자 화면의 수동 버튼은 서버 체이닝이 없어서
+// 한 번 클릭에 시간 예산(수십 초) 만큼만 처리하고 끝난다. 여기서 커서를 넘겨가며 클라이언트가
+// notDone=false 가 될 때까지 반복 호출해, 버튼 한 번으로 해당 테이블 전체가 끝나게 한다.
+function mergeSyncResult<T extends object>(prev: T | null, curr: T): T {
+  if (!prev) return curr;
+  const prevRecord = prev as Record<string, unknown>;
+  const currRecord = curr as Record<string, unknown>;
+  const merged: Record<string, unknown> = { ...currRecord };
+  for (const key of Object.keys(currRecord)) {
+    const prevValue = prevRecord[key];
+    const currValue = currRecord[key];
+    if (typeof prevValue === "number" && typeof currValue === "number") {
+      // total* 필드는 회차마다 "남은 대상 수"라 매번 줄어든다 — 최초 회차 값(전체 대상 수)을 유지.
+      merged[key] = key.startsWith("total") ? prevValue : prevValue + currValue;
+    } else if (Array.isArray(prevValue) && Array.isArray(currValue)) {
+      // errors 같은 배열 필드는 회차별로 이어붙여 최근 20건까지 보여준다.
+      merged[key] = [...prevValue, ...currValue].slice(0, 20);
+    }
+  }
+  return merged as T;
+}
+
+// 개별 항목 실패(contentid별 API 오류) 목록 — errorCount > 0 인데 원인을 모르면 재시도해도
+// 왜 계속 같은 건수만큼 실패하는지 알 길이 없어서, 서버가 돌려준 메시지를 그대로 보여준다.
+function SyncErrorList({ errors }: { errors?: { contentid: number; message: string }[] }) {
+  if (!errors || errors.length === 0) return null;
+  return (
+    <div className="border-gold-200 bg-gold-50 rounded-lg border p-4 text-sm">
+      <p className="text-gold-800 mb-2 font-semibold">실패 목록 (최대 {errors.length}건 표시)</p>
+      <ul className="text-gold-800 space-y-1">
+        {errors.map((e, i) => (
+          <li key={i} className="font-mono text-xs">
+            contentid={e.contentid}: {e.message}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+async function runSyncUntilDone<T extends object>(
+  target: string,
+  onProgress: (result: T) => void
+): Promise<T> {
+  let cursor = 0;
+  let acc: T | null = null;
+  for (;;) {
+    const url = `/api/place?target=${target}${cursor > 0 ? `&cursor=${cursor}` : ""}`;
+    const res = await fetch(url, { method: "POST" });
+    const json = (await res.json()) as T & {
+      notDone?: boolean;
+      nextCursor?: number;
+      error?: string;
+    };
+    if (!res.ok) throw new Error(json?.error ?? `동기화 실패 (HTTP ${res.status})`);
+    acc = mergeSyncResult(acc, json);
+    onProgress(acc);
+    if (!json.notDone) break;
+    cursor = typeof json.nextCursor === "number" ? json.nextCursor : cursor;
+  }
+  return acc;
+}
+
 function resolveAdminSection(sectionParam: string | string[] | undefined): string {
   if (typeof sectionParam === "string" && sectionParam.length > 0) return sectionParam;
   if (Array.isArray(sectionParam) && sectionParam.length > 0) return sectionParam[0];
@@ -113,6 +183,15 @@ export default function Admin() {
     width: number;
   } | null>(null);
   const mobileGroupBtnRef = useRef<HTMLButtonElement>(null);
+  const mobileTabsRef = useRef<HTMLDivElement>(null);
+
+  // 선택된 탭이 스크롤 영역 밖에 있을 수 있으니(스크롤바도 숨겨서 위치 단서가 없다), 렌더링될
+  // 때 항상 보이는 위치로 스크롤해 준다.
+  useEffect(() => {
+    mobileTabsRef.current
+      ?.querySelector<HTMLElement>('[data-active="true"]')
+      ?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [section]);
   const mobileGroupPanelRef = useRef<HTMLDivElement>(null);
   const toggleMobileGroup = (key: string, e: MouseEvent<HTMLButtonElement>) => {
     if (mobileGroupOpen === key) {
@@ -229,7 +308,10 @@ export default function Admin() {
       {/* 메인 영역 */}
       <div className="bg-surface-soft/40 flex min-w-0 flex-1 flex-col">
         {/* 모바일 탭바 */}
-        <div className="border-hairline-soft bg-background flex gap-1 overflow-x-auto border-b px-4 py-2 md:hidden">
+        <div
+          ref={mobileTabsRef}
+          className="border-hairline-soft bg-background flex [scrollbar-width:none] gap-1 overflow-x-auto border-b px-4 py-2 [-ms-overflow-style:none] md:hidden [&::-webkit-scrollbar]:hidden"
+        >
           {SECTIONS.map((item) => {
             if ("children" in item) {
               const Icon = item.icon;
@@ -239,6 +321,7 @@ export default function Admin() {
                 <button
                   key={item.key}
                   ref={isOpen ? mobileGroupBtnRef : undefined}
+                  data-active={childActive || undefined}
                   onClick={(e) => toggleMobileGroup(item.key, e)}
                   aria-expanded={isOpen}
                   className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition-colors ${
@@ -259,6 +342,7 @@ export default function Admin() {
             return (
               <button
                 key={key}
+                data-active={active || undefined}
                 onClick={() => router.push(key === "dashboard" ? "/admin" : `/admin/${key}`)}
                 className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition-colors ${
                   active ? "bg-navy-50 text-navy-700" : "text-steel hover:bg-surface-soft"
@@ -512,6 +596,46 @@ const PLACE_BAKERY_COLUMNS = [
 function PlaceSyncSection() {
   const [dbTab, setDbTab] = useState<DbTabKey>("place");
 
+  // 휠/네이티브 스크롤은 안 쓰고, 드래그(마우스든 터치든)로만 좌우로 넘긴다. 컨테이너에
+  // touch-none 을 줘서 터치의 네이티브 스크롤 제스처를 끄고, 아래 pointer 핸들러가 마우스/터치
+  // 구분 없이 직접 scrollLeft 를 옮긴다. 드래그 중 눌렀다 뗀 지점이 탭 버튼이면 click 이 그대로
+  // 발동해 탭이 바뀌어버리므로, 일정 거리 이상 움직였을 때만 그 click 을 막는다.
+  const tabDragRef = useRef({ down: false, startX: 0, startScrollLeft: 0, moved: false });
+
+  const handleTabPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    tabDragRef.current = {
+      down: true,
+      startX: e.clientX,
+      startScrollLeft: e.currentTarget.scrollLeft,
+      moved: false
+    };
+    // 여기서 바로 캡처하면 그냥 클릭한 것도 컨테이너가 가져가버려 버튼의 click 이 안 먹는다.
+    // 실제로 드래그가 감지됐을 때(handleTabPointerMove)만 캡처한다.
+  };
+  const handleTabPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = tabDragRef.current;
+    if (!drag.down) return;
+    const delta = e.clientX - drag.startX;
+    if (Math.abs(delta) > 3 && !drag.moved) {
+      drag.moved = true;
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+    if (drag.moved) e.currentTarget.scrollLeft = drag.startScrollLeft - delta;
+  };
+  // pointerup/pointercancel에서만 드래그를 끝낸다 — pointerleave로도 끝내면, 실제 손가락
+  // 드래그는 가로로만 움직이지 않고 위아래로도 살짝씩 벗어나기 마련이라 터치에서 드래그가
+  // 계속 끊겨 아주 조금씩만 스크롤되는 문제가 있었다.
+  const handleTabPointerUp = () => {
+    tabDragRef.current.down = false;
+  };
+  const handleTabClickCapture = (e: MouseEvent<HTMLDivElement>) => {
+    if (tabDragRef.current.moved) {
+      e.preventDefault();
+      e.stopPropagation();
+      tabDragRef.current.moved = false;
+    }
+  };
+
   return (
     <div className="space-y-5">
       <div>
@@ -523,7 +647,14 @@ function PlaceSyncSection() {
 
       {/* Supabase 테이블 탭 */}
       <div>
-        <div className="border-hairline-soft flex gap-1 overflow-x-auto border-b">
+        <div
+          onPointerDown={handleTabPointerDown}
+          onPointerMove={handleTabPointerMove}
+          onPointerUp={handleTabPointerUp}
+          onPointerCancel={handleTabPointerUp}
+          onClickCapture={handleTabClickCapture}
+          className="border-hairline-soft flex cursor-grab touch-none [scrollbar-width:none] gap-1 overflow-x-auto border-b select-none [-ms-overflow-style:none] active:cursor-grabbing [&::-webkit-scrollbar]:hidden"
+        >
           {DB_TABS.map(({ key, label, desc }) => {
             const active = dbTab === key;
             return (
@@ -615,10 +746,7 @@ function DbPlaceTable() {
     setSyncError("");
     setSyncResult(null);
     try {
-      const res = await fetch("/api/place?target=place", { method: "POST" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? `동기화 실패 (HTTP ${res.status})`);
-      setSyncResult(json as SyncResult);
+      await runSyncUntilDone<SyncResult>("place", setSyncResult);
       await fetchRows(0); // 동기화 후 첫 페이지부터 다시 조회
     } catch (e: unknown) {
       setSyncError(e instanceof Error ? e.message : String(e));
@@ -677,11 +805,13 @@ function DbPlaceTable() {
       {/* 동기화 결과 / 에러 */}
       {syncResult && (
         <div className="border-brand-200 bg-brand-50 text-brand-800 rounded-lg border p-4 text-sm">
-          ✓ 동기화 완료 — 대전 관광정보 {syncResult.totalPlaces}건 중 {syncResult.fetched}건
-          저장(upsert {syncResult.upserted}), 삭제 처리 {syncResult.deleted}건, 건너뜀{" "}
-          {syncResult.skipped}건{syncResult.errorCount > 0 && `, 실패 ${syncResult.errorCount}건`}
+          {syncing ? "⏳ 동기화 진행 중" : "✓ 동기화 완료"} — 대전 관광정보 {syncResult.totalPlaces}
+          건 중 {syncResult.fetched}건 저장(upsert {syncResult.upserted}), 삭제 처리{" "}
+          {syncResult.deleted}건, 건너뜀 {syncResult.skipped}건
+          {syncResult.errorCount > 0 && `, 실패 ${syncResult.errorCount}건`}
         </div>
       )}
+      <SyncErrorList errors={syncResult?.errors} />
       {syncError && (
         <div className="border-gold-200 bg-gold-50 flex items-start gap-3 rounded-lg border p-4">
           <AlertCircle className="text-gold-500 mt-0.5 h-4 w-4 shrink-0" />
@@ -764,6 +894,7 @@ interface SyncResult {
   deleted: number;
   skipped: number;
   errorCount: number;
+  errors?: { contentid: number; message: string }[];
 }
 
 function DbBarrierFreeTable() {
@@ -821,10 +952,7 @@ function DbBarrierFreeTable() {
     setSyncError("");
     setSyncResult(null);
     try {
-      const res = await fetch("/api/place?target=barrierfree", { method: "POST" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? `동기화 실패 (HTTP ${res.status})`);
-      setSyncResult(json as SyncResult);
+      await runSyncUntilDone<SyncResult>("barrierfree", setSyncResult);
       await fetchRows(0); // 동기화 후 첫 페이지부터 다시 조회
     } catch (e: unknown) {
       setSyncError(e instanceof Error ? e.message : String(e));
@@ -884,11 +1012,13 @@ function DbBarrierFreeTable() {
       {/* 동기화 결과 / 에러 */}
       {syncResult && (
         <div className="border-brand-200 bg-brand-50 text-brand-800 rounded-lg border p-4 text-sm">
-          ✓ 동기화 완료 — 대상 {syncResult.totalPlaces}건 중 무장애 정보 {syncResult.fetched}건
-          저장(upsert {syncResult.upserted}), 삭제 처리 {syncResult.deleted}건, 정보 없음{" "}
-          {syncResult.skipped}건{syncResult.errorCount > 0 && `, 실패 ${syncResult.errorCount}건`}
+          {syncing ? "⏳ 동기화 진행 중" : "✓ 동기화 완료"} — 대상 {syncResult.totalPlaces}건 중
+          무장애 정보 {syncResult.fetched}건 저장(upsert {syncResult.upserted}), 삭제 처리{" "}
+          {syncResult.deleted}건, 정보 없음 {syncResult.skipped}건
+          {syncResult.errorCount > 0 && `, 실패 ${syncResult.errorCount}건`}
         </div>
       )}
+      <SyncErrorList errors={syncResult?.errors} />
       {syncError && (
         <div className="border-gold-200 bg-gold-50 flex items-start gap-3 rounded-lg border p-4">
           <AlertCircle className="text-gold-500 mt-0.5 h-4 w-4 shrink-0" />
@@ -1034,10 +1164,7 @@ function DbBakeryTable() {
     setSyncError("");
     setSyncResult(null);
     try {
-      const res = await fetch("/api/place?target=bakery", { method: "POST" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? `동기화 실패 (HTTP ${res.status})`);
-      setSyncResult(json as BakerySyncResult);
+      await runSyncUntilDone<BakerySyncResult>("bakery", setSyncResult);
       await fetchRows(0); // 동기화 후 첫 페이지부터 다시 조회
     } catch (e: unknown) {
       setSyncError(e instanceof Error ? e.message : String(e));
@@ -1097,8 +1224,9 @@ function DbBakeryTable() {
       {/* 동기화 결과 / 에러 */}
       {syncResult && (
         <div className="border-brand-200 bg-brand-50 text-brand-800 rounded-lg border p-4 text-sm">
-          ✓ 동기화 완료 — 대상 {syncResult.totalCount}건 조회({syncResult.fetched}건), 신규{" "}
-          {syncResult.inserted}건, 수정 {syncResult.updated}건, 삭제 처리 {syncResult.deleted}건
+          {syncing ? "⏳ 동기화 진행 중" : "✓ 동기화 완료"} — 대상 {syncResult.totalCount}건 조회(
+          {syncResult.fetched}건), 신규 {syncResult.inserted}건, 수정 {syncResult.updated}건, 삭제
+          처리 {syncResult.deleted}건
           {syncResult.errorCount > 0 && `, 실패 ${syncResult.errorCount}건`}
         </div>
       )}
@@ -1238,10 +1366,7 @@ function DbPlaceDetailTable() {
     setSyncError("");
     setSyncResult(null);
     try {
-      const res = await fetch("/api/place?target=detail", { method: "POST" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? `동기화 실패 (HTTP ${res.status})`);
-      setSyncResult(json as SyncResult);
+      await runSyncUntilDone<SyncResult>("detail", setSyncResult);
       await fetchRows(0); // 동기화 후 첫 페이지부터 다시 조회
     } catch (e: unknown) {
       setSyncError(e instanceof Error ? e.message : String(e));
@@ -1301,11 +1426,13 @@ function DbPlaceDetailTable() {
       {/* 동기화 결과 / 에러 */}
       {syncResult && (
         <div className="border-brand-200 bg-brand-50 text-brand-800 rounded-lg border p-4 text-sm">
-          ✓ 동기화 완료 — 대상 {syncResult.totalPlaces}건 중 {syncResult.fetched}건 저장(upsert{" "}
-          {syncResult.upserted}), 삭제 처리 {syncResult.deleted}건, 정보 없음 {syncResult.skipped}건
+          {syncing ? "⏳ 동기화 진행 중" : "✓ 동기화 완료"} — 대상 {syncResult.totalPlaces}건 중{" "}
+          {syncResult.fetched}건 저장(upsert {syncResult.upserted}), 삭제 처리 {syncResult.deleted}
+          건, 정보 없음 {syncResult.skipped}건
           {syncResult.errorCount > 0 && `, 실패 ${syncResult.errorCount}건`}
         </div>
       )}
+      <SyncErrorList errors={syncResult?.errors} />
       {syncError && (
         <div className="border-gold-200 bg-gold-50 flex items-start gap-3 rounded-lg border p-4">
           <AlertCircle className="text-gold-500 mt-0.5 h-4 w-4 shrink-0" />
@@ -1498,10 +1625,7 @@ function DbPlaceDetailNormalizedTable() {
     setNormError("");
     setNormResult(null);
     try {
-      const res = await fetch("/api/place?target=normalize", { method: "POST" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? `정규화 실패 (HTTP ${res.status})`);
-      setNormResult(json as SyncResult);
+      await runSyncUntilDone<SyncResult>("normalize", setNormResult);
       await fetchRows(0); // 정규화 후 첫 페이지부터 다시 조회
     } catch (e: unknown) {
       setNormError(e instanceof Error ? e.message : String(e));
@@ -1561,8 +1685,8 @@ function DbPlaceDetailNormalizedTable() {
       {/* 정규화 결과 / 에러 */}
       {normResult && (
         <div className="border-brand-200 bg-brand-50 text-brand-800 rounded-lg border p-4 text-sm">
-          ✓ 정규화 완료 — tb_place_detail {normResult.totalPlaces}건에서 {normResult.upserted}건
-          복사(upsert)
+          {normalizing ? "⏳ 정규화 진행 중" : "✓ 정규화 완료"} — tb_place_detail{" "}
+          {normResult.totalPlaces}건에서 {normResult.upserted}건 복사(upsert)
         </div>
       )}
       {normError && (

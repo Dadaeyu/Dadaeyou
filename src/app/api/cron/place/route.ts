@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSyncConfig, runFullSync, TIME_BUDGET_MS } from "@/lib/place/syncEngine";
 
@@ -7,26 +6,36 @@ export const dynamic = "force-dynamic";
 // Vercel Hobby 플랜의 함수 실행 시간 상한(60초)에 맞춘다.
 export const maxDuration = 60;
 
-// 하루 안에 스스로를 이어 부를 수 있는 최대 횟수(무한 루프 방지 안전장치).
-// TIME_BUDGET_MS(45초) 기준으로 넉넉히 잡아도 총 몇 십 분 안에는 수렴한다.
-const MAX_CHAIN_DEPTH = 100;
-
-// 매일 오전 9시 30분(KST) 실행되는 장소 테이블 동기화 스케줄러.
-// vercel.json 의 crons 설정이 이 GET 라우트를 호출한다(UTC 00:30 = KST 09:30).
+// 하루 안에 처리해야 할 작업이 한 번 호출(약 40초)로는 다 안 끝난다(800건 넘는 장소×API 여러
+// 번). 예전에는 이 라우트가 자기 자신을 fetch로 다시 호출해 이어갔는데, 다음 회차가 완료될
+// 때까지(약 32초) 기다릴 여유가 없어 응답을 8초만 기다리고 끊어버리는 구조였다. "연결이 끊겨도
+// 다음 invocation이 독립적으로 계속 실행될 것"이라는 가정에 기대는 방식이라, 실제 배포
+// 환경에서는 몇 회차 진행되다 불규칙하게 끊기는 문제가 있었다(로컬 반복 호출 테스트로는
+// 24회차 전부 문제없이 끝났지만, 실서비스에서는 3~4회차 만에 멈추는 게 관측됨).
 //
-// Hobby 플랜은 크론을 하루 한 번만 트리거할 수 있고, 함수 실행도 60초로 제한된다. 그 안에
-// 전체 동기화(800건 넘는 장소×API 여러 번)를 다 끝낼 수 없어서, 한 번 호출될 때마다
-// TIME_BUDGET_MS(45초) 만큼만 일하고 남은 작업이 있으면 스스로를 다시 호출해 이어간다
-// (after()/waitUntil 로 응답을 먼저 보낸 뒤 백그라운드에서 다음 호출을 건다).
-// 크론 트리거는 하루 한 번이지만, 그 한 번이 여러 번의 짧은 호출로 자동으로 이어지는 구조다.
+// 이제 진행 상황(place_id 커서)을 URL로 넘기는 대신 DB(tb_place_sync_state)에 저장하고, 이
+// 라우트는 "호출될 때마다 DB에 저장된 지점부터 한 회차만 처리하고 끝"으로 단순화했다. 매일
+// 09:30(KST) Vercel Cron 트리거 하나로는 하루 안에 다 못 끝내므로, 외부 스케줄러(예:
+// cron-job.org)가 이 엔드포인트를 짧은 간격(예: 1~2분)으로 반복 호출해 이어가야 한다. 각 호출이
+// 완전히 독립적인 요청이라 "직전 호출이 다음 호출을 살려두는지" 같은 불확실성이 없다.
+//
+// place_sync_claim()이 DB 트랜잭션으로 락을 잡아, 짧은 간격으로 겹쳐 들어온 호출이 있어도
+// 한 번에 하나만 실제로 처리한다(락이 오래(기본 90초) 남아있으면 이전 실행이 죽은 것으로 보고
+// 새로 잡는다). 매일 자정이 지나 처음 호출되면 place_sync_claim() 이 커서와 완료 플래그를
+// 전부 초기화해 "매일 처음부터" 다시 돈다.
+//
+// place/bakery 는 detail/barrierfree 와 달리 커서 없이 매번 전체를 다시 조회하는 구조라(원래
+// 한 회차 안에 항상 끝남), 한 번 성공하면 place_done/bakery_done 을 세워 그 뒤 회차부터는
+// 건너뛴다 — 안 그러면 detail/barrierfree 가 아직 진행 중인 나머지 하루 동안 1분마다 계속
+// place/bakery 전체를 재조회하게 된다. 그날 detail/barrierfree/normalize 까지 전부 끝나면
+// (done=true) place_sync_claim() 이 락도 안 건드리고 DB 조회 한 번만 하고 바로 반환한다.
 //
 // 인증: Vercel Cron 은 CRON_SECRET 환경변수가 설정돼 있으면 요청에
 //   Authorization: Bearer <CRON_SECRET>
-// 헤더를 자동으로 실어 보낸다. 외부에서 임의로 호출해 동기화를 트리거하지
-// 못하도록, CRON_SECRET 이 설정된 경우 이 헤더를 검증한다. 체이닝으로 스스로를 부를 때도
-// 같은 헤더를 실어 보내 인증을 통과시킨다.
+// 헤더를 자동으로 실어 보낸다. 외부 스케줄러도 같은 헤더를 실어 보내도록 설정해야 한다.
+// CRON_SECRET 이 설정된 경우 이 헤더를 검증해, 외부에서 임의로 호출해 동기화를 트리거하지
+// 못하게 막는다.
 export async function GET(request: Request) {
-  const requestStartedAt = Date.now();
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
     const auth = request.headers.get("authorization");
@@ -44,13 +53,61 @@ export async function GET(request: Request) {
     auth: { persistSession: false }
   });
 
-  const chain = Math.max(0, Number(new URL(request.url).searchParams.get("chain") ?? "0") | 0);
+  const { data: claimRows, error: claimError } = await supabase.rpc("place_sync_claim");
+  if (claimError) {
+    return NextResponse.json({ error: `락 확인 실패: ${claimError.message}` }, { status: 502 });
+  }
+  const claim = claimRows?.[0] as
+    | {
+        claimed: boolean;
+        done: boolean;
+        place_done: boolean;
+        bakery_done: boolean;
+        detail_cursor: number;
+        barrierfree_cursor: number;
+        normalize_cursor: number;
+      }
+    | undefined;
+  if (!claim || !claim.claimed) {
+    const skipped = claim?.done ? "done_for_today" : "already_running";
+    console.log(`[cron/place] 이번 호출은 건너뜀 (${skipped})`);
+    return NextResponse.json({ ok: true, skipped });
+  }
 
-  // place 선행 → detail/barrierfree/bakery 병렬 (runFullSync 내부에서 처리)
+  const cursors = {
+    detail: claim.detail_cursor,
+    barrierfree: claim.barrierfree_cursor,
+    normalize: claim.normalize_cursor
+  };
+
   const startedAt = new Date().toISOString();
   const deadline = Date.now() + TIME_BUDGET_MS;
-  console.log(`[cron/place] 동기화 시작 ${startedAt} (chain=${chain})`);
-  const results = await runFullSync(supabase, deadline);
+  console.log(
+    `[cron/place] 동기화 시작 ${startedAt} (cursors=${JSON.stringify(cursors)}, ` +
+      `placeDone=${claim.place_done}, bakeryDone=${claim.bakery_done})`
+  );
+
+  let results: Awaited<ReturnType<typeof runFullSync>>;
+  try {
+    results = await runFullSync(supabase, deadline, cursors, {
+      skipPlace: claim.place_done,
+      skipBakery: claim.bakery_done
+    });
+  } catch (e) {
+    // 처리 중 예상 못한 예외가 나도 락은 반드시 풀어야 다음 호출이 이어받을 수 있다.
+    // 진행한 게 없으니 커서와 완료 플래그 모두 원래 자리 그대로 되돌린다.
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(`[cron/place] 동기화 중 예외 발생: ${message}`);
+    await supabase.rpc("place_sync_release", {
+      p_detail_cursor: cursors.detail,
+      p_barrierfree_cursor: cursors.barrierfree,
+      p_normalize_cursor: cursors.normalize,
+      p_done: false,
+      p_place_done: claim.place_done,
+      p_bakery_done: claim.bakery_done
+    });
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
   const finishedAt = new Date().toISOString();
 
   // 자동 실행은 응답 본문이 버려지므로, 테이블별 집계/에러를 로그로 남긴다.
@@ -60,7 +117,7 @@ export async function GET(request: Request) {
   for (const [table, r] of entries) {
     if (typeof r.error === "string") {
       // 테이블 전체 실패 (예: DB 조회/insert 실패) — 원인 메시지와 부분 진행 상황.
-      // 실패한 테이블은 다음 체이닝 호출에서 처음부터 다시 시도되도록 pendingWork 로 취급한다.
+      // 실패한 테이블은 다음 호출에서 같은 커서부터 다시 시도되도록 pendingWork 로 취급한다.
       console.error(`[cron/place] ${table} 실패: ${r.error}`, r.partial ?? "");
       pendingWork = true;
       continue;
@@ -78,40 +135,48 @@ export async function GET(request: Request) {
   }
   console.log(`[cron/place] 동기화 종료 ${finishedAt} (남은 작업: ${pendingWork})`);
 
-  // 남은 작업이 있으면 스스로를 다시 호출해 이어간다. 응답은 먼저 보내고(after), 다음 호출은
-  // 백그라운드에서 건다 — 그래야 지금 이 호출이 자기 자신의 60초 예산 안에서 안전하게 끝난다.
-  if (pendingWork && chain < MAX_CHAIN_DEPTH && cronSecret) {
-    const selfHost = process.env.VERCEL_URL; // 로컬(next dev)에는 없음 — 로컬에선 체이닝 안 함
-    if (selfHost) {
-      const nextUrl = `https://${selfHost}/api/cron/place?chain=${chain + 1}`;
-      after(async () => {
-        try {
-          // fetch() 는 다음 함수를 "부르는" 즉시(TCP 연결 + 요청 전송) 다음 invocation 이 시작되고,
-          // 그 실행은 이 함수의 커넥션과 무관하게 독립적으로 자기 예산(TIME_BUDGET_MS)만큼 계속
-          // 돈다 — 그러니 우리가 응답을 오래 기다려줄 필요가 없다. 오히려 after() 안에서 대기하는
-          // 시간도 이 함수 자신의 maxDuration(60초) 예산에 그대로 포함되므로, 본작업이 이미 시간을
-          // 많이 썼는데 여기서도 오래 기다리면 이 함수 자체가 60초를 넘겨 타임아웃으로 죽는다
-          // (실제로 본작업 41초 + 대기 58초 = 99초로 죽은 사례가 있었다). 지금까지 쓴 시간을 빼고
-          // 남은 예산 안에서만, 그것도 짧게(요청이 실제로 전달됐는지 확인할 정도만) 기다린다.
-          const elapsedMs = Date.now() - requestStartedAt;
-          const remainingMs = maxDuration * 1000 - elapsedMs - 3000; // 3초는 안전 여유
-          const waitMs = Math.max(1000, Math.min(8000, remainingMs));
-          await fetch(nextUrl, {
-            headers: { Authorization: `Bearer ${cronSecret}` },
-            signal: AbortSignal.timeout(waitMs)
-          });
-        } catch {
-          // 응답을 못 받았거나 시간 안에 못 기다렸어도, 요청 자체는 이미 전달돼 다음 invocation이
-          // 독립적으로 실행 중일 가능성이 높다 — 조용히 넘어간다. 최악의 경우 다음날 크론이 처음부터 다시 훑는다.
-          console.error(
-            "[cron/place] 다음 체이닝 호출 확인 실패(전달은 됐을 수 있음) — 다음날 크론 때 재시도됨"
-          );
-        }
-      });
-    } else {
-      console.log("[cron/place] VERCEL_URL 없음(로컬 실행) — 체이닝 생략, 이번 호출 결과만 반환");
-    }
+  // 다음 호출이 이어받을 커서 — 이번 회차 결과에 nextCursor 가 있으면 그 값, 없으면(예: place/bakery
+  // 처럼 커서 개념이 없는 테이블, 또는 이번 회차에서 아예 안 돈 경우) 이번에 넘겨받은 값을 그대로 유지.
+  const nextCursorOf = (table: "detail" | "barrierfree" | "normalize"): number => {
+    const r = results[table];
+    const value =
+      r && typeof r === "object" ? (r as Record<string, unknown>).nextCursor : undefined;
+    return typeof value === "number" ? value : cursors[table];
+  };
+  const nextCursors = {
+    detail: nextCursorOf("detail"),
+    barrierfree: nextCursorOf("barrierfree"),
+    normalize: nextCursorOf("normalize")
+  };
+
+  // place/bakery 는 커서가 없어 "이번 회차에 성공적으로 끝났는지"만으로 완료 여부를 판단한다.
+  // 이미 이전 회차에 끝나서 이번엔 건너뛴 경우(claim.place_done)도 계속 완료 상태를 유지한다.
+  const isTableDone = (table: "place" | "bakery"): boolean => {
+    const r = results[table] as Record<string, unknown>;
+    return typeof r.error !== "string" && r.notDone !== true;
+  };
+  const nextPlaceDone = claim.place_done || isTableDone("place");
+  const nextBakeryDone = claim.bakery_done || isTableDone("bakery");
+
+  const { error: releaseError } = await supabase.rpc("place_sync_release", {
+    p_detail_cursor: nextCursors.detail,
+    p_barrierfree_cursor: nextCursors.barrierfree,
+    p_normalize_cursor: nextCursors.normalize,
+    p_done: !pendingWork,
+    p_place_done: nextPlaceDone,
+    p_bakery_done: nextBakeryDone
+  });
+  if (releaseError) {
+    console.error(`[cron/place] 락 해제 실패: ${releaseError.message}`);
   }
 
-  return NextResponse.json({ ok: true, startedAt, finishedAt, chain, pendingWork, results });
+  return NextResponse.json({
+    ok: true,
+    startedAt,
+    finishedAt,
+    cursors,
+    nextCursors,
+    pendingWork,
+    results
+  });
 }

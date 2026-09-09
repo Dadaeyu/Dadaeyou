@@ -5,7 +5,7 @@ import {
   getSyncConfig,
   runFullSync,
   isSyncTarget,
-  SYNC_FNS,
+  runSyncTarget,
   TIME_BUDGET_MS
 } from "@/lib/place/syncEngine";
 
@@ -27,7 +27,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: config.error }, { status: 500 });
   }
 
-  const target = new URL(request.url).searchParams.get("target") ?? "all";
+  const searchParams = new URL(request.url).searchParams;
+  const target = searchParams.get("target") ?? "all";
+  // 관리자 화면이 완료(notDone=false)될 때까지 이 엔드포인트를 반복 호출하며 이어 넘겨주는
+  // 커서 — cron 스케줄러의 체이닝과 같은 개념을, 자동 재호출 대신 클라이언트 반복으로 처리한다.
+  const cursorParam = Math.max(0, Number(searchParams.get("cursor") ?? "0") | 0);
 
   const supabase = createClient(config.supabaseUrl, config.secretKey, {
     auth: { persistSession: false }
@@ -36,7 +40,7 @@ export async function POST(request: Request) {
 
   // 단일 테이블 동기화 — 기존 응답 형태(flat SyncResult)를 그대로 유지
   if (isSyncTarget(target)) {
-    const outcome = await SYNC_FNS[target](supabase, deadline);
+    const outcome = await runSyncTarget(supabase, target, deadline, cursorParam);
     return outcome.ok
       ? NextResponse.json(outcome.result)
       : NextResponse.json(
@@ -46,10 +50,29 @@ export async function POST(request: Request) {
   }
 
   // 전체 동기화 — place 선행 후 detail/barrierfree 병렬 실행, 테이블별 결과를 묶어서 반환.
-  // 60초 예산 안에 다 못 끝나면 각 결과의 notDone 이 true 로 남고, 관리자가 다시 누르면 이어서
-  // 처리된다(스케줄러는 자동으로 체이닝하지만, 이 수동 엔드포인트는 그렇게 안 하므로).
+  // 60초 예산 안에 다 못 끝나면 각 결과의 notDone 이 true 로 남고, 관리자 화면이 nextCursors 를
+  // 다음 호출의 cursor 로 실어 보내며 반복한다.
   if (target === "all") {
-    return NextResponse.json(await runFullSync(supabase, deadline));
+    const cursors = {
+      detail: Math.max(0, Number(searchParams.get("detailCursor") ?? "0") | 0),
+      barrierfree: Math.max(0, Number(searchParams.get("barrierfreeCursor") ?? "0") | 0),
+      normalize: Math.max(0, Number(searchParams.get("normalizeCursor") ?? "0") | 0)
+    };
+    const results = await runFullSync(supabase, deadline, cursors);
+    const nextCursorOf = (table: "detail" | "barrierfree" | "normalize"): number => {
+      const r = results[table];
+      const value =
+        r && typeof r === "object" ? (r as Record<string, unknown>).nextCursor : undefined;
+      return typeof value === "number" ? value : cursors[table];
+    };
+    return NextResponse.json({
+      ...results,
+      nextCursors: {
+        detail: nextCursorOf("detail"),
+        barrierfree: nextCursorOf("barrierfree"),
+        normalize: nextCursorOf("normalize")
+      }
+    });
   }
 
   return NextResponse.json(

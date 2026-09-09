@@ -1,12 +1,14 @@
 "use client";
 
 import { useAccessibility, FONT_SCALE_MIN, FONT_SCALE_MAX } from "@/context/AccessibilityContext";
+import { useAuth } from "@/context/AuthContext";
+import AccessibilityAccountSaveHint from "@/components/AccessibilityAccountSaveHint";
 
 const TOGGLES = [
   {
     key: "readAloud" as const,
     label: "음성 읽어주기",
-    description: "포커스·마우스 올린 내용 음성 안내",
+    description: "화면의 글·카드를 누르면 그 내용을 읽고, 다음 내용 읽기로 이어서 들을 수 있습니다",
     toggle: "toggleReadAloud" as const
   },
   {
@@ -33,8 +35,11 @@ export function DisplaySettingsSection() {
     toggleHighContrast,
     toggleDarkMode,
     increaseFontScale,
-    decreaseFontScale
+    decreaseFontScale,
+    accountSaveStatus,
+    retryAccountSave
   } = useAccessibility();
+  const { user } = useAuth();
 
   const values = { readAloud, highContrast, darkMode };
   const toggles = {
@@ -45,14 +50,19 @@ export function DisplaySettingsSection() {
 
   return (
     <div className="max-w-xl space-y-2">
-      <p className="text-stone mb-3 text-xs">변경 내용은 바로 적용되며 계정에 저장됩니다.</p>
+      <AccessibilityAccountSaveHint
+        status={accountSaveStatus}
+        loggedIn={Boolean(user)}
+        saving={accountSaveStatus === "saving"}
+        onRetry={retryAccountSave}
+      />
 
       {TOGGLES.map(({ key, label, description, toggle }) => (
         <button
           key={key}
           type="button"
           onClick={toggles[toggle]}
-          className="hover:bg-surface-soft flex w-full items-center justify-between rounded-xl border border-gray-200 px-4 py-3 transition-colors"
+          className="hover:bg-surface-soft border-hairline flex w-full items-center justify-between rounded-xl border px-4 py-3 transition-colors"
           aria-pressed={values[key]}
         >
           <div className="text-left">
@@ -74,7 +84,7 @@ export function DisplaySettingsSection() {
         </button>
       ))}
 
-      <div className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-4 py-3">
+      <div className="border-hairline flex w-full items-center justify-between rounded-xl border px-4 py-3">
         <div className="text-left">
           <p className="text-ink text-sm font-semibold">화면 확대</p>
           <p className="text-stone text-xs">텍스트 크기를 조절합니다</p>
@@ -84,7 +94,7 @@ export function DisplaySettingsSection() {
             type="button"
             onClick={decreaseFontScale}
             disabled={fontScale <= FONT_SCALE_MIN}
-            className="flex h-8 w-8 items-center justify-center rounded-md bg-gray-100 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+            className="border-hairline flex h-8 w-8 items-center justify-center rounded-md border bg-gray-100 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="화면 축소"
           >
             −
@@ -99,7 +109,7 @@ export function DisplaySettingsSection() {
             type="button"
             onClick={increaseFontScale}
             disabled={fontScale >= FONT_SCALE_MAX}
-            className="flex h-8 w-8 items-center justify-center rounded-md bg-gray-100 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+            className="border-hairline flex h-8 w-8 items-center justify-center rounded-md border bg-gray-100 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="화면 확대"
           >
             +

@@ -44,42 +44,33 @@ The signed direct-install APK and Play upload AAB are expected to be regenerated
 The local `private/android-release/` path is also ignored defensively if a
 checkout is ever created directly above that directory.
 
-## Current Release Artifacts
+## Current Release Artifact
 
-The locally generated `1.0.1` (`versionCode 2`) release is stored outside Git:
+The current Play upload bundle is `1.0.2` (`versionCode 4`) and is stored outside Git:
 
-- Installable APK: `/Users/ijehyeog/Desktop/workspace/project/dadaeyu/private/android-release/dadaeyu-1.0.1-com.dadaeyou.app-release.apk`
-- Play upload AAB: `/Users/ijehyeog/Desktop/workspace/project/dadaeyu/private/android-release/dadaeyu-1.0.1-com.dadaeyou.app-release.aab`
-- Checksum file: `/Users/ijehyeog/Desktop/workspace/project/dadaeyu/private/android-release/checksums-1.0.1-com.dadaeyou.app.sha256`
+- Play upload AAB: `/Users/ijehyeog/Desktop/workspace/project/dadaeyu/private/android-release/dadaeyu-1.0.2-vc4-com.dadaeyou.app-release.aab`
 
-Older `1.0.0` and `kr.dadaeyu.app` artifacts remain archived in the same private directory. Do not upload those older files to the Play Console for this release.
+Older artifacts remain archived in the same private directory. Do not upload them for this release.
 
-Current SHA-256 checksums:
+Current SHA-256 checksum:
 
 ```text
-ec02bb0d329db54fda35645f3707a5fd58bd1dba5e90a62cd001fc13a8f394e5  dadaeyu-1.0.1-com.dadaeyou.app-release.aab
-288fd0613da536ac564499ae8c998773b4f732173e182ad0cc50255e21c901c3  dadaeyu-1.0.1-com.dadaeyou.app-release.apk
+dbee5623cf20a12d30ef3a1be7eda1e2f4acd3c8e4c9d4ca49e3a9ded518f298  dadaeyu-1.0.2-vc4-com.dadaeyou.app-release.aab
 ```
 
-Both artifacts are signed by the upload certificate whose SHA-256 fingerprint is:
+The AAB is signed by the upload certificate whose SHA-256 fingerprint is:
 
 ```text
 8A:E2:7B:BB:05:05:25:AB:A6:60:85:75:9F:E4:08:D1:C4:E1:E7:7A:7B:9C:DE:B1:46:0E:73:9E:E1:0C:0B:0C
 ```
 
-The APK contains package `com.dadaeyou.app`, `versionCode 2`, `versionName 1.0.1`, `compileSdk 36`, and `targetSdk 36`. Its only app-requested runtime capabilities are fine/coarse location for location delegation; notification permission is not included.
+The bundle contains package `com.dadaeyou.app`, `versionCode 4`, `versionName 1.0.2`, `minSdk 23`, `compileSdk 36`, and `targetSdk 36`. It uses Android Browser Helper `2.7.2` and explicitly launches the verified TWA through Chrome (`com.android.chrome`) instead of accepting an arbitrary compatible browser selected by the device.
 
-## Install The APK
+## Install Through Play
 
-With a USB-debugging-enabled Android device connected:
+The AAB cannot be installed directly. Upload it as a new release to a Play Console internal test track, publish the test release, and update the installed app to `versionCode 4` through Google Play. The existing `versionCode 3` installation does not contain this TWA runtime fix.
 
-```sh
-/Users/ijehyeog/Library/Android/sdk/platform-tools/adb install -r /Users/ijehyeog/Desktop/workspace/project/dadaeyu/private/android-release/dadaeyu-1.0.1-com.dadaeyou.app-release.apk
-```
-
-Alternatively, transfer the APK to the phone, open it, and temporarily allow that file app to install unknown apps. The AAB cannot be installed directly; upload it to Play Console for internal testing or production distribution.
-
-No authorized Android device was connected during this build, so automatic installation was not performed.
+No authorized Android device was connected during this build, so the Play-installed runtime state could not be inspected with ADB.
 
 ## Production Web Prerequisite
 
@@ -89,11 +80,10 @@ confirm that `/`, `/manifest.webmanifest`, `/sw.js`, `/offline.html`,
 `/privacy`, `/account-deletion`, and `/.well-known/assetlinks.json` return the
 intended content over HTTPS without redirects.
 
-The upload-key fingerprint currently authorizes the directly installed APK.
-After the AAB is uploaded, also add the Play App Signing SHA-256 fingerprint to
-the same `sha256_cert_fingerprints` array and deploy again. Until the relevant
-fingerprint and package ID are live, the app can fall back to a Custom Tab with
-browser UI instead of a verified full-screen TWA.
+The deployed asset links file authorizes the package and all currently recorded
+Play/upload SHA-256 fingerprints. Until the certificate actually used for an
+installed build and the package ID are both live, the app can fall back to a
+Custom Tab with browser UI instead of a verified full-screen TWA.
 
 ## Verification Contract
 

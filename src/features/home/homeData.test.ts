@@ -56,11 +56,15 @@ test("기존 프로필 값을 홈 도움 조건으로 변환한다", () => {
   ]);
   assert.deepEqual(
     homeNeedIdsToChatNeeds(["step_free", "short_distance", "hearing_guidance", "easy_explanation"]),
-    ["mobility_access", "short_distance", "hearing_impairment", "easy_explanation"]
+    ["step_free", "short_distance", "hearing_impairment", "easy_explanation"]
   );
   assert.deepEqual(
     homeNeedIdsToChatNeeds(["accessible_toilet", "stroller_friendly", "family_support"]),
-    ["mobility_access", "stroller"]
+    ["accessible_toilet", "stroller"]
+  );
+  assert.deepEqual(
+    homeNeedIdsToChatNeeds(["step_free", "parking_friendly", "public_transport_ready"]),
+    ["step_free", "accessible_parking", "public_transport"]
   );
 });
 

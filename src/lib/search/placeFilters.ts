@@ -76,12 +76,41 @@ function isoWeekday(dateStr: string): number {
   return g === 0 ? 7 : g;
 }
 
+// 축제/공연/행사(lclssystm1='EV')는 "요일별 휴무"라는 개념이 없다 — eventstartdate ~
+// eventenddate 기간에만 실제로 열린다. 요청한 [dateFrom ~ dateTo]와 이 기간이 전혀 안 겹치면
+// 제외한다(하루라도 겹치면 노출 유지). 날짜 정보가 없는 축제는 판정 불가이니 제외하지 않는다.
+async function getEventScheduleExcludeIds(
+  fromYmd: string,
+  toYmd: string,
+  evIds: string[]
+): Promise<string[]> {
+  if (evIds.length === 0) return [];
+
+  const { data: evDetails } = await supabase
+    .from("tb_place_detail_normalized")
+    .select("contentid, eventstartdate, eventenddate")
+    .in("contentid", evIds);
+
+  const exclude: string[] = [];
+  for (const row of evDetails ?? []) {
+    const start = row.eventstartdate as string | null;
+    const end = row.eventenddate as string | null;
+    if (!start && !end) continue; // 날짜 정보 없음 → 판정 불가, 노출 유지
+    // 한쪽만 있으면 그 값으로 시작/끝을 채워 단일 날짜 행사로 취급한다.
+    const s = start || end!;
+    const e = end || start!;
+    if (e < fromYmd || s > toYmd) exclude.push(row.contentid as string); // 기간이 전혀 안 겹침
+  }
+  return exclude;
+}
+
 // 일정(휴무일) 필터로 "제외"할 contentid 목록.
 // [dateFrom ~ dateTo] 기간 "내내" 확실히 문을 닫는 곳만 제외한다. (하루라도 열면 노출 유지)
 //  - 기간의 모든 요일을 매주 휴무하는 곳 (요일만으로 기간 내내 휴무)
 //  - 공휴일 휴무이면서 비공휴일 날은 요일로 전부 닫는 곳 → 결국 기간 내내 휴무.
 //    (기간이 전부 공휴일이면 공휴일 휴무만으로도 기간 내내 휴무이므로 제외)
 // has_irregular_closing(부정기 휴무)는 특정 날짜 판정이 불가하므로 제외하지 않는다(노출 유지).
+// 축제/공연/행사(EV)는 위 요일 로직 대신 getEventScheduleExcludeIds 의 행사 기간 겹침 판정을 쓴다.
 export async function getScheduleExcludeIds(dateFrom: string, dateTo: string): Promise<string[]> {
   const from = dateFrom || dateTo;
   const to = dateTo || dateFrom;
@@ -140,6 +169,16 @@ export async function getScheduleExcludeIds(dateFrom: string, dateTo: string): P
       .contains("closed_weekdays", [...nonHolidayWeekdays]);
     for (const r of data ?? []) exclude.add(r.contentid as string);
   }
+
+  // EV(축제/공연/행사)는 요일 기반 판정 대상이 아니므로, 혹시 위 로직으로 걸렸더라도 빼고
+  // 행사 기간 겹침 판정 결과로 완전히 대체한다.
+  const { data: evPlaces } = await supabase
+    .from("tb_place")
+    .select("contentid")
+    .eq("lclssystm1", "EV");
+  const evIds = (evPlaces ?? []).map((r) => r.contentid as string);
+  for (const id of evIds) exclude.delete(id);
+  for (const id of await getEventScheduleExcludeIds(fromYmd, toYmd, evIds)) exclude.add(id);
 
   return [...exclude];
 }

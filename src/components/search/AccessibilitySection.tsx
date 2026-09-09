@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { useAccessibility } from "@/context/AccessibilityContext";
 
 const CATEGORY_ICON: Record<string, string> = {
   보행: "♿",
@@ -25,7 +24,6 @@ export default function AccessibilitySection({
   groups: { category: string; items: { label: string; text: string }[] }[];
 }) {
   const [openCategory, setOpenCategory] = useState<string | null>(null);
-  const { speak } = useAccessibility();
 
   return (
     <div>
@@ -49,24 +47,12 @@ export default function AccessibilitySection({
 
           return (
             <div key={group.category} className="bg-brand-50 overflow-hidden rounded-xl">
-              {/* 헤더 — 접힌 상태에선 카테고리·요약·태그를 한 번에 읽고, 펼치거나 접으면
-                  그 즉시(호버 없이도) 바뀐 내용을 다시 읽어준다. */}
+              {/* 헤더 — 접힌 상태에선 카테고리·요약·태그를 한 번에 읽는다. 펼치면 아래
+                  항목들이 각자 aria-label(라벨: 내용)로 hover에 걸린다. */}
               <button
-                onClick={() => {
-                  const next = isOpen ? null : group.category;
-                  setOpenCategory(next);
-                  if (next) {
-                    speak(
-                      `${group.category} 펼침, ${group.items
-                        .map((item) => `${item.label}, ${stripHtml(item.text)}`)
-                        .join(", ")}`
-                    );
-                  } else {
-                    speak(`${group.category} 접힘`);
-                  }
-                }}
+                onClick={() => setOpenCategory(isOpen ? null : group.category)}
                 aria-label={isOpen ? `${group.category}, 펼쳐짐` : collapsedLabel}
-                data-speak-group="true"
+                data-speakable="true"
                 className="w-full p-3 text-left"
               >
                 <div className="mb-1.5 flex items-center justify-between">

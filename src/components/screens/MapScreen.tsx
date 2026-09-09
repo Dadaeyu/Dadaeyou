@@ -8,12 +8,16 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent
 } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { LocateFixed, X, MoreVertical, Palette, RotateCcw, ZoomIn, Check } from "lucide-react";
 import { useFilters } from "@/components/PlaceFilters";
 import KakaoMap, { type MapMarker, type MapPathSegment } from "@/components/KakaoMap";
 import PlaceSearchSidebar from "@/components/search/PlaceSearchSidebar";
-import { type PlaceRouteGuideState } from "@/components/search/TourismDetailPanel";
+import {
+  type PlaceRouteGuideState,
+  type RouteOriginPhase,
+  type RouteOriginPlace
+} from "@/components/search/TourismDetailPanel";
 import {
   getCategoryColor,
   LCLSSYSTM1_COLORS,
@@ -21,6 +25,9 @@ import {
 } from "@/lib/search/categoryColors";
 import { usePlaceSearch } from "@/hooks/usePlaceSearch";
 import { useMyLocation, type MyLocationErrorReason } from "@/hooks/useMyLocation";
+import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
+import { getMapRenderPlaces } from "@/lib/search/mapDeepLinkState";
+import { parseCourseReturnPath } from "@/lib/search/mapRouteHref";
 import {
   fetchDirections,
   openKakaoMapRoute,
@@ -73,11 +80,17 @@ function nearestMobileSheetSnap(heightPct: number, containerH: number): MobileSh
 // 지도 화면: 사이드바(검색/필터/목록) + KakaoMap. usePlaceSearch·useMyLocation 훅으로
 // DB/카카오 검색 결과와 내 위치를 지도에 반영하고, 선택한 장소의 상세 패널을 보여준다.
 export default function Map() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const initialTheme = searchParams.get("theme");
   const initialQuery = searchParams.get("query")?.trim() ?? "";
   const initialContentId = searchParams.get("contentId");
   const mapOnly = searchParams.get("mode") === "map";
+  const startRouteOnLoad = searchParams.get("route") === "1";
+  const courseReturnPath = parseCourseReturnPath(searchParams.get("from"));
+  const startRouteOnLoadRef = useRef(startRouteOnLoad);
+  const courseReturnPathRef = useRef(courseReturnPath);
+  useLockBodyScroll();
 
   // 모바일(및 mapOnly) 하단 시트 — 오버레이 높이 스냅(peek / 50% / 55% / full).
   // 핸들이 시트와 같이 움직이므로 window 리스너로 드래그 추적한다.
@@ -253,6 +266,7 @@ export default function Map() {
     isLoadingDetail,
     handleSearch,
     focusPlaceById,
+    focusedPlace,
     topRatedPlaces,
     isLoadingTopRated,
     hasActiveFilter,
@@ -323,8 +337,8 @@ export default function Map() {
   const routeOptionsRef = useRef<RouteOption[] | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState("0");
   const routeRequestIdRef = useRef(0);
-  const pendingRouteModeRef = useRef<RouteMode | null>(null);
-  const handleStartRouteRef = useRef<(mode: RouteMode) => Promise<void>>(async () => {});
+  const [routeOrigin, setRouteOrigin] = useState<RouteOriginPlace | null>(null);
+  const [routeOriginPhase, setRouteOriginPhase] = useState<RouteOriginPhase>("idle");
 
   const handleSelectRoute = (id: string) => {
     const options = routeOptionsRef.current;
@@ -356,12 +370,48 @@ export default function Map() {
 
   const clearRouteGuide = () => {
     routeRequestIdRef.current += 1;
-    pendingRouteModeRef.current = null;
     routeOptionsRef.current = null;
     setSelectedRouteId("0");
     setRouteGuide(null);
     setRoutePath([]);
     setRouteStops(null);
+  };
+
+  const handleBeginRoute = () => {
+    setSheetDragPct(null);
+    setMobileSheetSnap((snap) => (snap === "peek" ? "half" : snap));
+    if (routeOriginPhase === "searching") return;
+    clearRouteGuide();
+    setRouteOriginPhase(routeOrigin ? "picked" : "searching");
+  };
+
+  useEffect(() => {
+    if (!startRouteOnLoadRef.current) return;
+    if (!searchDetail) return;
+    if (initialContentId && searchDetail.id !== initialContentId) return;
+    startRouteOnLoadRef.current = false;
+    setSheetDragPct(null);
+    setMobileSheetSnap((snap) => (snap === "peek" ? "half" : snap));
+    setRouteOriginPhase("searching");
+  }, [initialContentId, searchDetail]);
+
+  const handlePickOrigin = (place: RouteOriginPlace) => {
+    setRouteOrigin(place);
+    setRouteOriginPhase("picked");
+    setSheetDragPct(null);
+    setMobileSheetSnap((snap) => (snap === "peek" ? "half" : snap));
+  };
+
+  const handleChangeOrigin = () => {
+    clearRouteGuide();
+    setRouteOriginPhase("searching");
+    setSheetDragPct(null);
+    setMobileSheetSnap((snap) => (snap === "peek" ? "half" : snap));
+  };
+
+  const handleDismissRoute = () => {
+    clearRouteGuide();
+    setRouteOriginPhase("idle");
   };
 
   const applyDirectionsResult = (
@@ -397,31 +447,16 @@ export default function Map() {
   };
 
   const handleStartRoute = async (mode: RouteMode) => {
-    if (!searchDetail) {
-      pendingRouteModeRef.current = null;
+    if (!searchDetail) return;
+    if (!routeOrigin) {
+      setRouteOriginPhase("searching");
       return;
     }
 
-    if (!myLocation || myLocationStatus !== "active") {
-      pendingRouteModeRef.current = mode;
-      handleStartMyLocation();
-      setRouteGuide({
-        mode,
-        loading: true,
-        error: null,
-        distanceM: null,
-        durationSec: null,
-        onOpenKakao: () => {},
-        onClear: clearRouteGuide
-      });
-      return;
-    }
-
-    pendingRouteModeRef.current = null;
     const origin = {
-      lat: myLocation.lat,
-      lng: myLocation.lng,
-      name: "내 위치"
+      lat: routeOrigin.lat,
+      lng: routeOrigin.lng,
+      name: routeOrigin.name
     };
     const destination = {
       lat: searchDetail.lat,
@@ -465,67 +500,53 @@ export default function Map() {
     }
   };
 
-  useEffect(() => {
-    handleStartRouteRef.current = handleStartRoute;
-  });
-
-  // 경로안내 중 GPS가 준비되면 자동으로 길찾기 재시도
-  useEffect(() => {
-    const pending = pendingRouteModeRef.current;
-    if (!pending) return;
-
-    if (myLocationStatus === "active" && myLocation) {
-      const timer = window.setTimeout(() => {
-        void handleStartRouteRef.current(pending);
-      }, 0);
-      return () => window.clearTimeout(timer);
-    }
-
-    if (myLocationStatus === "error") {
-      const timer = window.setTimeout(() => {
-        pendingRouteModeRef.current = null;
-        const copy = getMyLocationErrorCopy(myLocationError);
-        setRouteGuide((prev) =>
-          prev
-            ? {
-                ...prev,
-                loading: false,
-                error: `${copy.title} ${copy.help}`
-              }
-            : null
-        );
-      }, 0);
-      return () => window.clearTimeout(timer);
-    }
-  }, [myLocation, myLocationStatus, myLocationError]);
-
   const activeFilterCount = activeCount;
   const resetFilters = () => {
     reset();
   };
 
   const selectPlace = (id: string) => {
+    if (id === "route-origin") return;
+    if (initialContentId && id !== initialContentId && courseReturnPathRef.current) {
+      courseReturnPathRef.current = null;
+    }
     clearRouteGuide();
+    setRouteOriginPhase("idle");
     setSearchDetailId(id);
     // 이름만 보이는 상태면 장소 상세를 볼 수 있게 기본 비율로 펼친다.
     setSheetDragPct(null);
     setMobileSheetSnap((snap) => (snap === "peek" ? "default" : snap));
   };
 
-  const backFromDetail = () => {
+  const closePlaceDetail = () => {
     clearRouteGuide();
+    setRouteOriginPhase("idle");
     setSearchDetailId(null);
+  };
+
+  const backFromDetail = () => {
+    const returnTo = courseReturnPathRef.current;
+    if (returnTo) {
+      router.push(returnTo);
+      return;
+    }
+    closePlaceDetail();
   };
 
   // 필터/검색을 아무것도 안 켰을 때만 핫플레이스를 기본으로 보여준다.
   // 필터를 켰는데 결과가 0개면(searchPlaces=[]) 그대로 빈 목록으로 둬서 "결과 없음"이 보이게 한다.
-  const displayPlaces = hasActiveFilter ? searchPlaces : topRatedPlaces;
-  const markerPlaces = hasActiveFilter ? searchPlaces : topRatedPlaces;
+  const displayPlaces = getMapRenderPlaces({
+    focusedPlace,
+    hasActiveFilter,
+    searchPlaces,
+    topRatedPlaces
+  });
+  const markerPlaces = displayPlaces;
 
   return (
     <div
       className="relative -mx-4 -mt-6 -mb-24 flex overflow-hidden md:-mx-6"
-      style={{ height: "calc(100vh - 64px)" }}
+      style={{ height: "calc(100dvh - 64px)" }}
     >
       {/* ── 검색 패널 — 데스크톱은 왼쪽 고정 사이드바, 모바일(및 mapOnly)은 코스 상세와 동일한
           드래그 가능한 하단 시트. 검색 목록 ↔ 상세 전환도 PlaceSearchSidebar 가 내부에서 처리한다. ── */}
@@ -601,6 +622,12 @@ export default function Map() {
             onBackFromDetail={backFromDetail}
             onLikeChange={refreshLiked}
             onStartRoute={handleStartRoute}
+            onBeginRoute={handleBeginRoute}
+            routeOrigin={routeOrigin}
+            routeOriginPhase={routeOriginPhase}
+            onPickOrigin={handlePickOrigin}
+            onChangeOrigin={handleChangeOrigin}
+            onDismissRoute={handleDismissRoute}
             routeGuide={routeGuide}
           />
         </div>
@@ -609,37 +636,50 @@ export default function Map() {
       {/* ── MAP AREA ── */}
       <div ref={mapAreaRef} className="relative flex-1 overflow-hidden">
         <KakaoMap
-          markers={markerPlaces.map((sp): MapMarker => {
-            if (sp.source === "kakao") {
-              // 눈물방울 핀(카카오 옐로우 배경 + 파란 중앙 점)으로 카카오 검색 결과임을 표시.
+          markers={[
+            ...markerPlaces.map((sp): MapMarker => {
+              if (sp.source === "kakao") {
+                // 눈물방울 핀(카카오 옐로우 배경 + 파란 중앙 점)으로 카카오 검색 결과임을 표시.
+                return {
+                  id: sp.id,
+                  lat: sp.lat,
+                  lng: sp.lng,
+                  color: "#FEE500",
+                  borderColor: "#2563EB",
+                  shape: "teardrop"
+                };
+              }
+              if (filters.favoritesOnly && likedIds.has(sp.id)) {
+                return { id: sp.id, lat: sp.lat, lng: sp.lng, color: "#ef4444", shape: "heart" };
+              }
+              // 추천 장소(로그인 + 접근성/선호테마 매칭)는 핀 안에 별 표시로 통일한다.
+              // 매칭 이유(접근성/선호테마) 구분은 목록의 텍스트 배지에서만 보여준다.
+              const matchLabel = sp.matchedAccessibility || sp.matchedTheme ? "★" : undefined;
               return {
                 id: sp.id,
                 lat: sp.lat,
                 lng: sp.lng,
-                color: "#FEE500",
-                borderColor: "#2563EB",
-                shape: "teardrop"
+                color: getCategoryColor(sp.categoryCode),
+                label: matchLabel
               };
-            }
-            if (filters.favoritesOnly && likedIds.has(sp.id)) {
-              return { id: sp.id, lat: sp.lat, lng: sp.lng, color: "#ef4444", shape: "heart" };
-            }
-            // 추천 장소(로그인 + 접근성/선호테마 매칭)는 핀 안에 별 표시로 통일한다.
-            // 매칭 이유(접근성/선호테마) 구분은 목록의 텍스트 배지에서만 보여준다.
-            const matchLabel = sp.matchedAccessibility || sp.matchedTheme ? "★" : undefined;
-            return {
-              id: sp.id,
-              lat: sp.lat,
-              lng: sp.lng,
-              color: getCategoryColor(sp.categoryCode),
-              label: matchLabel
-            };
-          })}
+            }),
+            ...(routeOrigin
+              ? [
+                  {
+                    id: "route-origin",
+                    lat: routeOrigin.lat,
+                    lng: routeOrigin.lng,
+                    color: "#2563eb",
+                    shape: "dot" as const,
+                    label: "출",
+                    zIndex: 8
+                  } satisfies MapMarker
+                ]
+              : [])
+          ]}
           selectedId={searchDetailId}
           onSelect={(id) => selectPlace(id)}
-          onDeselect={() => {
-            backFromDetail();
-          }}
+          onDeselect={closePlaceDetail}
           myLocation={myLocation}
           focusMyLocationTrigger={focusMyLocationTrigger}
           resetViewTrigger={myLocationResetTrigger + mapManualResetTrigger}

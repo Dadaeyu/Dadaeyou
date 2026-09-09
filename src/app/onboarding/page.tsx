@@ -12,7 +12,8 @@ import {
 } from "@/lib/supabase/member";
 import ThemePreferencePicker from "@/components/ThemePreferencePicker";
 import AccessibilityNeedsPicker from "@/components/AccessibilityNeedsPicker";
-import { getSafeNextPath, isOAuthUser } from "@/lib/auth/actions";
+import { getSafeNextPath, hasEmailPasswordAuth } from "@/lib/auth/actions";
+import { isGeneratedNickname, suggestedNicknameFromAuthUser } from "@/lib/auth/display-nickname";
 import { AGE_GROUP_UI_OPTIONS, ageGroupFromLabel, genderFromLabel } from "@/lib/supabase/types";
 
 const GENDERS = ["남성", "여성", "비공개"] as const;
@@ -23,7 +24,7 @@ function OnboardingForm() {
   const next = getSafeNextPath(searchParams.get("next"), "/");
   const { user, member, preferences, refreshMember, loading: authLoading } = useAuth();
 
-  const skipNickname = Boolean(user && !isOAuthUser(user));
+  const skipNickname = hasEmailPasswordAuth(user);
 
   const [nickname, setNickname] = useState("");
   const [genderLabel, setGenderLabel] = useState<(typeof GENDERS)[number]>("비공개");
@@ -35,14 +36,17 @@ function OnboardingForm() {
   const [themes, setThemes] = useState<string[]>([]);
   const [accessNeeds, setAccessNeeds] = useState<string[]>([]);
 
+  const suggestedNickname = user ? suggestedNicknameFromAuthUser(user) : "";
+
   useEffect(() => {
-    if (!member?.nickname) return;
-    const currentNickname = member.nickname;
+    const fromMember =
+      member?.nickname && !isGeneratedNickname(member.nickname) ? member.nickname.trim() : "";
+    const next = fromMember || suggestedNickname;
     queueMicrotask(() => {
-      setNickname(currentNickname);
+      setNickname(next);
       setSetupError(null);
     });
-  }, [member?.nickname]);
+  }, [member?.nickname, suggestedNickname]);
 
   useEffect(() => {
     if (!preferences?.theme_preferences?.length) return;
@@ -79,6 +83,10 @@ function OnboardingForm() {
     const trimmed = skipNickname ? (member?.nickname ?? nickname.trim()) : nickname.trim();
 
     if (!skipNickname) {
+      if (isGeneratedNickname(trimmed)) {
+        setError("닉네임을 2자 이상 입력해 주세요.");
+        return;
+      }
       const available = await isNicknameAvailable(trimmed, user.id);
       const validationError = getNicknameSubmitError(trimmed, available);
       if (validationError) {

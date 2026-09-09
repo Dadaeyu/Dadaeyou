@@ -88,7 +88,7 @@
                 android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR_DARK"
                 android:resource="@color/navigationColorDark" />
 
-            <!-- androidbrowserhelper 2.6.2 reads this historical "androix" key verbatim. -->
+            <!-- Android Browser Helper reads this historical "androix" key verbatim. -->
             <meta-data
                 android:name="androix.browser.trusted.NAVIGATION_BAR_DIVIDER_COLOR"
                 android:resource="@color/navigationDividerColor" />
@@ -113,6 +113,14 @@
 
             <meta-data android:name="android.support.customtabs.trusted.FALLBACK_STRATEGY"
                 android:value="@string/fallbackType" />
+
+            <meta-data
+                android:name="android.support.customtabs.trusted.LAUNCHING_BROWSER"
+                android:value="com.android.chrome" />
+
+            <meta-data
+                android:name="android.support.customtabs.trusted.LAUNCHING_BROWSER_NAME"
+                android:value="Chrome" />
 
 
 

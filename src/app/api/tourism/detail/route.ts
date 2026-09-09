@@ -16,7 +16,7 @@ export async function GET(request: Request) {
       .single(),
     supabase
       .from("tb_place_detail_normalized")
-      .select("overview, infocenter, usetime, restdate")
+      .select("overview, infocenter, usetime, restdate, eventstartdate, eventenddate")
       .eq("contentid", contentId)
       .maybeSingle(),
     supabase.from("tb_place_barrierfree").select("*").eq("contentid", contentId).maybeSingle()
@@ -54,6 +54,8 @@ export async function GET(request: Request) {
     overview: detail?.overview ?? null,
     use_time: detail?.usetime ?? null,
     rest_date: detail?.restdate ?? null,
+    event_start_date: detail?.eventstartdate ?? null,
+    event_end_date: detail?.eventenddate ?? null,
     phone: detail?.infocenter ?? null,
     like_count: likeCounts.get(String(contentId)) ?? 0,
     accessibility

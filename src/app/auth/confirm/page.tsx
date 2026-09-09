@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthLayout from "@/components/AuthLayout";
 import { createClient } from "@/lib/supabase/client";
@@ -19,6 +19,22 @@ function ConfirmForm() {
   const tokenHash = searchParams.get("token_hash");
   const type = searchParams.get("type");
   const next = getSafeNextPath(searchParams.get("next"), "/mypage");
+  const isOAuthCode = !!(code && !tokenHash);
+
+  useEffect(() => {
+    if (!isOAuthCode) return;
+    const callback = new URL("/auth/callback", window.location.origin);
+    searchParams.forEach((value, key) => callback.searchParams.set(key, value));
+    window.location.replace(callback.toString());
+  }, [isOAuthCode, searchParams]);
+
+  if (isOAuthCode) {
+    return (
+      <AuthLayout title="로그인 처리 중" subtitle="소셜 로그인 정보를 확인하고 있어요">
+        <p className="text-stone text-center text-sm">잠시만 기다려 주세요.</p>
+      </AuthLayout>
+    );
+  }
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);

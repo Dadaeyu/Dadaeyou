@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { HomeDiscovery } from "@/features/home/HomeDiscovery";
 import { HomeRecommendations } from "@/features/home/HomeRecommendations";
+import { HomeTravelSupport } from "@/features/home/HomeTravelSupport";
+import { HomeWeatherNotice } from "@/features/home/HomeWeatherNotice";
 import { HOME_NEED_ICONS, HOME_VISIT_SITUATIONS } from "@/features/home/HomeHero";
 import { getHomeRecommendationNeedIds, type HomeNeedId } from "@/features/home/homeData";
 import type { HomeExperience } from "@/features/home/useHomeExperience";
@@ -29,8 +31,11 @@ export function EasyHome({
 }) {
   const selectedRecommendationNeeds = getHomeRecommendationNeedIds(experience.selectedNeedIds);
 
-  const selectNeedAndShowResults = (needId: HomeNeedId) => {
+  const selectNeed = (needId: HomeNeedId) => {
     experience.toggleNeed(needId);
+  };
+
+  const showSelectedRecommendations = () => {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         document.getElementById(EASY_RECOMMENDATIONS_ID)?.scrollIntoView({
@@ -141,7 +146,7 @@ export function EasyHome({
                 <button
                   key={option.id}
                   type="button"
-                  onClick={() => selectNeedAndShowResults(option.id)}
+                  onClick={() => selectNeed(option.id)}
                   disabled={experience.auth.loading}
                   aria-pressed={selected}
                   aria-controls={EASY_RECOMMENDATIONS_ID}
@@ -187,7 +192,7 @@ export function EasyHome({
 
             <button
               type="button"
-              onClick={() => selectNeedAndShowResults("accessible_toilet")}
+              onClick={() => selectNeed("accessible_toilet")}
               disabled={experience.auth.loading}
               aria-pressed={experience.selectedNeedIds.includes("accessible_toilet")}
               aria-controls={EASY_RECOMMENDATIONS_ID}
@@ -223,7 +228,19 @@ export function EasyHome({
               </span>
             </button>
           </div>
+
+          <button
+            type="button"
+            onClick={showSelectedRecommendations}
+            aria-controls={EASY_RECOMMENDATIONS_ID}
+            className="border-easy-navy bg-easy-mint mt-5 flex min-h-20 w-full items-center justify-between gap-4 rounded-2xl border-[3px] px-5 text-xl font-extrabold text-white shadow-[0_8px_0_var(--color-easy-navy)] transition-transform active:translate-y-1 active:shadow-[0_4px_0_var(--color-easy-navy)]"
+          >
+            선택한 조건으로 추천 보기
+            <ArrowRight className="h-8 w-8 shrink-0" aria-hidden="true" />
+          </button>
         </section>
+
+        <HomeWeatherNotice easyMode />
 
         <section className="border-easy-navy rounded-[1.75rem] border-[3px] bg-white">
           <div className="border-easy-navy border-b-[3px] p-4 sm:p-6">
@@ -243,6 +260,8 @@ export function EasyHome({
             targetId={EASY_RECOMMENDATIONS_ID}
           />
         </section>
+
+        <HomeTravelSupport easyMode />
 
         <HomeDiscovery
           festivals={experience.data?.festivals ?? []}

@@ -123,6 +123,17 @@ export async function proxy(request: NextRequest) {
   }
 
   if (AUTH_PATHS.includes(pathname) && user && !needsEmailConfirmation(user)) {
+    const { data: authPathMember } = await supabase
+      .from("tb_members")
+      .select("status")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (authPathMember?.status === "withdrawn" || authPathMember?.status === "suspended") {
+      await supabase.auth.signOut();
+      return response;
+    }
+
     const next = request.nextUrl.searchParams.get("next") ?? "/mypage";
     const destPath = await resolveAuthDestination(supabase, user.id, next, "/mypage");
     const dest = request.nextUrl.clone();

@@ -16,7 +16,7 @@ import {
   type HomeDiscoveryHotPlace,
   type RankedHomeDiscoveryCourse
 } from "@/features/home/homeDiscoveryData";
-import { cleanHomePresentationText } from "@/features/home/homePresentation";
+import { buildHomePlaceMapHref, cleanHomePresentationText } from "@/features/home/homePresentation";
 
 interface HomeDiscoveryProps {
   festivals: RankedHomePlace[];
@@ -209,7 +209,7 @@ function PlaceSection({
         {places.map((place, index) => (
           <Link
             key={place.id}
-            href={`/map?contentId=${encodeURIComponent(place.id)}`}
+            href={buildHomePlaceMapHref({ id: place.id, title: place.name })}
             className={cx(
               "border-hairline group hover:border-brand-200 focus-visible:outline-brand-600 bg-background overflow-hidden rounded-xl border text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-3",
               !easyMode &&

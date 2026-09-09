@@ -4,7 +4,7 @@
 
 import { MapPin } from "lucide-react";
 import { useState } from "react";
-import { normalizeHomeImageSource } from "@/features/home/homePresentation";
+import { buildHomeFallbackCopy, normalizeHomeImageSource } from "@/features/home/homePresentation";
 
 export function HomePlaceImage({
   src,
@@ -27,6 +27,7 @@ export function HomePlaceImage({
     })
     .filter((source, index, allSources) => allSources.indexOf(source) === index);
   const activeSource = candidates.find((source) => !failedSources.includes(source)) ?? null;
+  const fallbackCopy = buildHomeFallbackCopy({ compact: compactFallback });
 
   if (!activeSource) {
     return (
@@ -68,15 +69,13 @@ export function HomePlaceImage({
                   : "mt-3 text-sm sm:text-base"
               }`}
             >
-              대표 사진이 없어요
+              {fallbackCopy.title}
             </span>
-            <span
-              className={`text-brand-900/65 mt-1 text-xs leading-5 ${
-                compactFallback ? "hidden sm:block" : "hidden min-[360px]:block"
-              }`}
-            >
-              주소와 방문 정보는 그대로 확인할 수 있어요
-            </span>
+            {fallbackCopy.description ? (
+              <span className="text-brand-900/65 mt-1 hidden text-xs leading-5 min-[360px]:block">
+                {fallbackCopy.description}
+              </span>
+            ) : null}
           </span>
         </span>
       </span>

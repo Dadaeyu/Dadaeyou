@@ -7,12 +7,15 @@ import {
 } from "@/lib/tour-weather";
 import {
   asksForSingleRecommendation,
+  resolveRequestedRecommendationLimit,
   selectDiverseItems
 } from "@/lib/chat/recommendationDiversity";
+import { filterRowsByAccessibilityEvidence } from "@/lib/chat/accessibilityEvidence";
 import {
   formatChatAccessibilityText,
   formatChatDisplayText,
   getPublicChatSourceLabel,
+  shouldReturnChatPlaceCards,
   uniqueChatSuggestions
 } from "@/lib/chat/presentation";
 import {
@@ -31,6 +34,16 @@ import { reserveChatUsage, ChatUsageError } from "@/lib/chat/server/usage";
 import { createFixedWindowRateLimiter } from "@/lib/server/fixed-window-rate-limit";
 import { readBoundedRequestBody } from "@/lib/server/read-bounded-request-body";
 import { createTimeoutSignal } from "@/lib/server/timeout-signal";
+import { getKnowledgeContentId } from "@/lib/chat/discoveryLinks";
+import { shouldUseGroundedRecommendation } from "@/lib/chat/groundedRecommendation";
+import {
+  filterRowsByAllowedContentIds,
+  filterRowsByExplicitCategories,
+  resolveSessionChatCategories,
+  resolveSessionChatTheme,
+  type ExplicitChatTheme
+} from "@/lib/chat/topicRelevance";
+import { getBakeryChatKnowledgeRows } from "@/lib/theme/bakeryTheme";
 
 type Confidence = "high" | "medium" | "low";
 
@@ -55,6 +68,7 @@ type ChatResponse = {
 };
 
 type PlaceCard = {
+  contentId: string | null;
   title: string;
   category: string | null;
   address: string | null;
@@ -111,7 +125,24 @@ type QueryAnalysis = {
   place_name: string | null;
   location: string | null;
   keywords: string[];
+  requested_categories: string[];
+  requested_theme: ExplicitChatTheme | null;
 };
+
+const CHAT_ACCESSIBILITY_NEEDS = [
+  "wheelchair",
+  "stroller",
+  "elderly",
+  "visual_impairment",
+  "hearing_impairment",
+  "mobility_access",
+  "step_free",
+  "accessible_toilet",
+  "accessible_parking",
+  "public_transport",
+  "short_distance",
+  "easy_explanation"
+] as const;
 
 type ChatHistoryItem = {
   role: "assistant" | "user";
@@ -246,6 +277,26 @@ const ACCESSIBILITY_RULES: Record<string, { tags: string[]; fields: string[]; te
     fields: ["parking", "publictransport", "route", "exit", "elevator", "restroom"],
     terms: ["이동약자", "장애인", "경사로", "엘리베이터", "화장실", "접근로"]
   },
+  step_free: {
+    tags: ["wheelchair", "mobility_access"],
+    fields: ["route", "exit", "entrance", "elevator", "wheelchair"],
+    terms: ["계단 없음", "단차 없음", "턱 없음", "무단차", "접근로", "경사로", "엘리베이터"]
+  },
+  accessible_toilet: {
+    tags: ["wheelchair", "mobility_access"],
+    fields: ["restroom", "toilet"],
+    terms: ["장애인 화장실", "장애인화장실", "화장실"]
+  },
+  accessible_parking: {
+    tags: ["wheelchair", "mobility_access"],
+    fields: ["parking"],
+    terms: ["장애인 주차", "장애인주차장", "전용 주차", "교통약자 주차"]
+  },
+  public_transport: {
+    tags: ["mobility_access"],
+    fields: ["publictransport", "public_transport"],
+    terms: ["대중교통", "저상버스", "버스", "정류장", "역"]
+  },
   short_distance: {
     tags: ["mobility_access"],
     fields: ["parking", "publictransport", "route", "exit", "elevator", "restroom"],
@@ -336,7 +387,7 @@ const classifierPrompt = [
   "코딩, 과제, 투자, 정치, 일반 잡담, 여행과 무관한 지식 질문은 in_scope를 false로 둔다.",
   "scope_reason은 범위 판단 이유를 한국어 짧은 문장으로 쓴다.",
   "intent는 recommend_place, check_accessibility, ask_info 중 하나다.",
-  "accessibility_needs는 wheelchair, stroller, elderly, visual_impairment, hearing_impairment, mobility_access, short_distance, easy_explanation 중 필요한 값만 넣는다.",
+  "accessibility_needs는 wheelchair, stroller, elderly, visual_impairment, hearing_impairment, mobility_access, step_free, accessible_toilet, accessible_parking, public_transport, short_distance, easy_explanation 중 필요한 값만 넣는다.",
   "날씨, 오늘, 비, 더위, 추위, 미세먼지처럼 현재 조건이 필요하면 weather_sensitive를 true로 둔다.",
   "대전 앱이므로 location이 없으면 대전으로 둔다.",
   "place_name은 특정 장소명이 있으면 문자열, 없으면 null이다.",
@@ -719,22 +770,55 @@ function createSuccessResponse({
   searchTerms: string[];
   weather?: TourWeatherResult;
 }): ChatResponse {
-  const places = prioritizeConversationPlaces(buildPlaceCards(knowledge.rows), conversationContext);
+  const evidenceRows = shouldFilterRowsByAccessibilityEvidence(analysis)
+    ? filterRowsByAccessibilityEvidence(knowledge.rows, analysis.accessibility_needs)
+    : knowledge.rows;
+  if (shouldFilterRowsByAccessibilityEvidence(analysis) && !evidenceRows.length) {
+    return createNoKnowledgeResponse({
+      analysis,
+      inputMessage,
+      knowledge: {
+        ...knowledge,
+        rows: [],
+        message: "조건 일치 없음: 요청한 접근성 근거를 확인할 수 없음"
+      },
+      searchTerms,
+      weather
+    });
+  }
+  const prioritizedPlaces = prioritizeConversationPlaces(
+    buildPlaceCards(evidenceRows),
+    conversationContext
+  );
+  const recommendationLimit = resolveRequestedRecommendationLimit(inputMessage, {
+    defaultLimit: 2,
+    maxLimit: 5
+  });
+  const messagePlaces = shouldUseGroundedRecommendation(analysis.intent, prioritizedPlaces.length)
+    ? prioritizedPlaces.slice(0, recommendationLimit)
+    : analysis.intent === "check_accessibility" || analysis.intent === "ask_info"
+      ? prioritizedPlaces.slice(0, 1)
+      : prioritizedPlaces;
+  const places = shouldReturnChatPlaceCards({
+    intent: analysis.intent,
+    isFollowUp: conversationContext.isFollowUp,
+    hasPlaces: messagePlaces.length > 0
+  })
+    ? messagePlaces
+    : [];
   const placeFollowUpChips = places
     .flatMap((place) => buildPlaceFollowUps(place.title, place.category))
     .slice(0, 3);
-  const responseMessage =
-    analysis.intent === "recommend_place" &&
-    (places.length >= 2 || (conversationContext.isFollowUp && places.length > 0))
-      ? createCompactRecommendationMessage({
-          analysis,
-          inputMessage,
-          conversationContext,
-          places
-        })
-      : analysis.intent === "check_accessibility" && places.length
-        ? createGroundedAccessibilityCheckMessage(places[0], analysis.accessibility_needs)
-        : message;
+  const responseMessage = shouldUseGroundedRecommendation(analysis.intent, messagePlaces.length)
+    ? createCompactRecommendationMessage({
+        analysis,
+        inputMessage,
+        conversationContext,
+        places: messagePlaces
+      })
+    : analysis.intent === "check_accessibility" && messagePlaces.length
+      ? createGroundedAccessibilityCheckMessage(messagePlaces[0], analysis.accessibility_needs)
+      : message;
   const normalizedInput = normalizeStaticFaqText(inputMessage);
   const chips = uniqueChatSuggestions(
     [
@@ -762,6 +846,11 @@ function createSuccessResponse({
       ...getWeatherDebugPayload(weather)
     }
   };
+}
+
+function shouldFilterRowsByAccessibilityEvidence(analysis: QueryAnalysis) {
+  if (!analysis.accessibility_needs.length) return false;
+  return analysis.intent === "recommend_place" || analysis.intent === "check_accessibility";
 }
 
 function prioritizeConversationPlaces(places: PlaceCard[], context: ConversationContext) {
@@ -811,6 +900,10 @@ function createGroundedAccessibilityCheckMessage(place: PlaceCard, needs: string
 
 function getAccessibilityInfoLabel(needs: string[]) {
   if (needs.includes("stroller")) return "유모차 이용";
+  if (needs.includes("accessible_toilet")) return "장애인 화장실";
+  if (needs.includes("accessible_parking")) return "장애인 주차";
+  if (needs.includes("public_transport")) return "대중교통";
+  if (needs.includes("step_free")) return "계단 없는 이동";
   if (needs.includes("visual_impairment")) return "시각장애인 편의";
   if (needs.includes("hearing_impairment")) return "청각장애인 편의";
   if (needs.includes("elderly")) return "이동 편의";
@@ -840,10 +933,24 @@ function createCompactRecommendationMessage({
   conversationContext: ConversationContext;
   places: PlaceCard[];
 }) {
-  const recommendedPlaces = places.slice(0, 2);
+  const recommendedPlaces = places;
   const location = analysis.location?.trim() || "대전";
   const [firstPlace, secondPlace] = recommendedPlaces;
   const isFollowUp = conversationContext.isFollowUp;
+
+  if (!firstPlace) {
+    return "현재 조건에 맞는 장소를 찾지 못했어요.";
+  }
+
+  if (!secondPlace) {
+    return [
+      isFollowUp
+        ? `앞에서 본 후보 중에서는 ${withObjectParticle(firstPlace.title)} 먼저 확인해보세요.`
+        : `${getRecommendationLead(analysis, location)} ${withObjectParticle(firstPlace.title)} 먼저 살펴보세요.`,
+      createCompactPlaceRecommendationSentence(firstPlace, analysis.accessibility_needs),
+      "운영 시간과 자세한 편의시설은 아래 카드에서 볼 수 있어요."
+    ].join(" ");
+  }
 
   if (conversationContext.wantsDifferentPlaces) {
     const seenTitles = new Set(
@@ -852,12 +959,11 @@ function createCompactRecommendationMessage({
     const allNew = recommendedPlaces.every(
       (place) => !seenTitles.has(normalizeConversationReferenceText(place.title))
     );
-    const selectedPlaces =
-      asksForSingleRecommendation(inputMessage) || !secondPlace ? [firstPlace] : recommendedPlaces;
+    const selectedPlaces = recommendedPlaces;
     const lead =
       selectedPlaces.length === 1
         ? `${allNew ? "앞에서 본 곳은 빼고" : "이번에는"} ${withObjectParticle(firstPlace.title)} 추천할게요.`
-        : `${allNew ? "앞에서 본 곳과 겹치지 않게" : "이번에는"} ${joinPlaceNames(firstPlace.title, secondPlace.title)} 살펴보세요.`;
+        : `${allNew ? "앞에서 본 곳과 겹치지 않게" : "이번에는"} ${joinSelectedPlaceNames(selectedPlaces)} 살펴보세요.`;
 
     return [
       lead,
@@ -878,16 +984,25 @@ function createCompactRecommendationMessage({
 
   return [
     isFollowUp
-      ? `앞에서 본 후보 중에서는 ${joinPlaceNames(firstPlace.title, secondPlace.title)} 먼저 비교해볼 만해요.`
-      : `${getRecommendationLead(analysis, location)} ${joinPlaceNames(firstPlace.title, secondPlace.title)} 먼저 살펴보세요.`,
-    createCompactPlaceRecommendationSentence(firstPlace, analysis.accessibility_needs),
-    createCompactPlaceRecommendationSentence(secondPlace, analysis.accessibility_needs),
+      ? `앞에서 본 후보 중에서는 ${joinSelectedPlaceNames(recommendedPlaces)} 먼저 비교해볼 만해요.`
+      : `${getRecommendationLead(analysis, location)} ${joinSelectedPlaceNames(recommendedPlaces)} 먼저 살펴보세요.`,
+    ...recommendedPlaces.map((place) =>
+      createCompactPlaceRecommendationSentence(place, analysis.accessibility_needs)
+    ),
     "운영 시간과 자세한 편의시설은 아래 카드에서 볼 수 있어요."
   ].join(" ");
 }
 
 function joinPlaceNames(firstTitle: string, secondTitle: string) {
   return `${firstTitle}${getKoreanParticle(firstTitle, "과", "와")} ${secondTitle}${getKoreanParticle(secondTitle, "을", "를")}`;
+}
+
+function joinSelectedPlaceNames(places: PlaceCard[]) {
+  if (places.length === 1) return withObjectParticle(places[0].title);
+  if (places.length === 2) return joinPlaceNames(places[0].title, places[1].title);
+
+  const [firstPlace, secondPlace] = places;
+  return `${firstPlace.title}, ${secondPlace.title} 등 ${places.length}곳을`;
 }
 
 function withObjectParticle(value: string) {
@@ -921,9 +1036,11 @@ function hasFinalConsonant(value: string) {
 
 function createCompactPlaceRecommendationSentence(place: PlaceCard, needs: string[]) {
   const activity = place.activity.trim().replace(/[.。]$/, "");
-  const activitySentence = `${withTopicParticle(place.title)} ${activity}${
-    activity.endsWith("곳") ? "이에요." : "예요."
-  }`;
+  const activitySentence = `${
+    normalizeForSearch(activity).startsWith(normalizeForSearch(place.title))
+      ? activity
+      : `${withTopicParticle(place.title)} ${activity}`
+  }${activity.endsWith("곳") ? "이에요." : "예요."}`;
   const accessibilityFact = getPreferredAccessibilityFact(place.accessibility, needs);
 
   return accessibilityFact
@@ -938,9 +1055,19 @@ function getRecommendationLead(analysis: QueryAnalysis, location: string) {
   if (analysis.accessibility_needs.includes("short_distance")) {
     return "이동거리가 짧은 곳을 찾는다면";
   }
+  if (analysis.accessibility_needs.includes("accessible_toilet")) {
+    return "장애인 화장실 정보를 함께 보고 싶다면";
+  }
+  if (analysis.accessibility_needs.includes("accessible_parking")) {
+    return "장애인 주차 정보를 함께 보고 싶다면";
+  }
+  if (analysis.accessibility_needs.includes("public_transport")) {
+    return "대중교통으로 이동할 곳을 찾는다면";
+  }
   if (
     analysis.accessibility_needs.includes("wheelchair") ||
-    analysis.accessibility_needs.includes("mobility_access")
+    analysis.accessibility_needs.includes("mobility_access") ||
+    analysis.accessibility_needs.includes("step_free")
   ) {
     return "휠체어 이동을 고려하고 있다면";
   }
@@ -960,13 +1087,21 @@ function getRecommendationLead(analysis: QueryAnalysis, location: string) {
 function getPreferredAccessibilityFact(items: string[], needs: string[]) {
   const preferredLabels = needs.includes("stroller")
     ? ["유모차", "엘리베이터", "출입통로", "수유실"]
-    : needs.includes("short_distance")
-      ? ["출입통로", "엘리베이터", "장애인 주차", "주차", "휴식"]
-      : needs.includes("visual_impairment")
-        ? ["점자블록", "보조견", "안내요원", "오디오 가이드"]
-        : needs.includes("hearing_impairment")
-          ? ["수화", "자막", "청각"]
-          : ["출입통로", "엘리베이터", "장애인 주차", "장애인 화장실"];
+    : needs.includes("accessible_toilet")
+      ? ["장애인 화장실", "화장실"]
+      : needs.includes("accessible_parking")
+        ? ["장애인 주차", "주차"]
+        : needs.includes("public_transport")
+          ? ["대중교통", "버스", "정류장", "접근로"]
+          : needs.includes("step_free")
+            ? ["출입통로", "엘리베이터", "접근로"]
+            : needs.includes("short_distance")
+              ? ["출입통로", "엘리베이터", "장애인 주차", "주차", "휴식"]
+              : needs.includes("visual_impairment")
+                ? ["점자블록", "보조견", "안내요원", "오디오 가이드"]
+                : needs.includes("hearing_impairment")
+                  ? ["수화", "자막", "청각"]
+                  : ["출입통로", "엘리베이터", "장애인 주차", "장애인 화장실"];
 
   return (
     preferredLabels
@@ -1050,6 +1185,9 @@ function buildPlaceCards(rows: KnowledgeRow[]): PlaceCard[] {
       const title = formatChatDisplayText(
         getFirstTextFromRows(placeRows, (row) => getRowText(row, "title")) || "제목 없음"
       );
+      const contentId = getFirstTextFromRows(placeRows, (row) =>
+        getKnowledgeContentId(row.metadata)
+      );
       const category = cleanOptionalChatText(getBestPlaceCategory(placeRows));
       const address = cleanOptionalChatText(getFirstTextFromRows(placeRows, getRowAddress));
       const tel = cleanOptionalChatText(getFirstTextFromRows(placeRows, getRowTel));
@@ -1061,6 +1199,7 @@ function buildPlaceCards(rows: KnowledgeRow[]): PlaceCard[] {
       ).slice(0, 6);
 
       return {
+        contentId,
         title,
         category,
         address,
@@ -1387,7 +1526,19 @@ function createConversationContext(
         "1번",
         "2번",
         "3번",
-        "다시추천"
+        "다시추천",
+        "휠체어",
+        "유모차",
+        "장애인",
+        "주차",
+        "화장실",
+        "엘리베이터",
+        "실내",
+        "비오는날",
+        "1박2일",
+        "당일",
+        "코스",
+        "동선"
       ]));
 
   return {
@@ -1592,16 +1743,7 @@ function normalizeAnalysis(value: unknown, message: string): QueryAnalysis {
     record.intent === "ask_info"
       ? record.intent
       : fallback.intent;
-  const allowedNeeds = new Set([
-    "wheelchair",
-    "stroller",
-    "elderly",
-    "visual_impairment",
-    "hearing_impairment",
-    "mobility_access",
-    "short_distance",
-    "easy_explanation"
-  ]);
+  const allowedNeeds = new Set<string>(CHAT_ACCESSIBILITY_NEEDS);
   const accessibilityNeeds = Array.isArray(record.accessibility_needs)
     ? record.accessibility_needs
         .filter((item): item is string => typeof item === "string")
@@ -1635,7 +1777,9 @@ function normalizeAnalysis(value: unknown, message: string): QueryAnalysis {
       typeof record.location === "string" && record.location.trim()
         ? record.location.trim()
         : "대전",
-    keywords
+    keywords,
+    requested_categories: [],
+    requested_theme: null
   };
 }
 
@@ -1671,22 +1815,15 @@ function fallbackAnalysis(message: string): QueryAnalysis {
       message.includes("오늘") || message.includes("날씨") || message.includes("비"),
     place_name: null,
     location: "대전",
-    keywords
+    keywords,
+    requested_categories: [],
+    requested_theme: null
   };
 }
 
 function normalizeProfileAccessibilityNeeds(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  const allowedNeeds = new Set([
-    "wheelchair",
-    "stroller",
-    "elderly",
-    "visual_impairment",
-    "hearing_impairment",
-    "mobility_access",
-    "short_distance",
-    "easy_explanation"
-  ]);
+  const allowedNeeds = new Set<string>(CHAT_ACCESSIBILITY_NEEDS);
   return Array.from(
     new Set(
       value.filter((item): item is string => typeof item === "string" && allowedNeeds.has(item))
@@ -1694,17 +1831,26 @@ function normalizeProfileAccessibilityNeeds(value: unknown): string[] {
   );
 }
 
-function rankKnowledgeRows(rows: KnowledgeRow[], analysis: QueryAnalysis, searchTerms: string[]) {
+function rankKnowledgeRows(
+  rows: KnowledgeRow[],
+  analysis: QueryAnalysis,
+  searchTerms: string[],
+  allowedContentIds: string[] | null
+) {
+  const categoryRows = filterRowsByExplicitCategories(rows, analysis.requested_categories);
+  const relevantRows = allowedContentIds
+    ? filterRowsByAllowedContentIds(categoryRows, allowedContentIds)
+    : categoryRows;
   const placeName = normalizeForSearch(analysis.place_name || "");
   const placeMatchedRows = placeName
-    ? rows.filter((row) => rowMatchesPlaceName(row, placeName))
+    ? relevantRows.filter((row) => rowMatchesPlaceName(row, placeName))
     : [];
 
   if (placeName && analysis.intent === "check_accessibility" && !placeMatchedRows.length) {
     return [];
   }
 
-  const candidates = placeMatchedRows.length ? placeMatchedRows : rows;
+  const candidates = placeMatchedRows.length ? placeMatchedRows : relevantRows;
   const desiredCategories = getDesiredCategories(searchTerms);
   const usefulTerms = searchTerms.filter(isUsefulRankingTerm);
 
@@ -1963,6 +2109,10 @@ function buildEmbeddingInput(analysis: QueryAnalysis, searchTerms: string[]) {
       ? `접근성 조건: ${analysis.accessibility_needs.join(", ")}`
       : null,
     analysis.weather_sensitive ? "날씨/실내 조건 고려" : null,
+    analysis.requested_categories.length
+      ? `요청 범주: ${analysis.requested_categories.join(", ")}`
+      : null,
+    analysis.requested_theme === "bakery" ? "요청 테마: 빵지순례" : null,
     analysis.keywords.length ? `핵심어: ${analysis.keywords.join(", ")}` : null,
     searchTerms.length ? `검색어: ${searchTerms.join(", ")}` : null
   ]
@@ -2229,12 +2379,80 @@ async function fetchKnowledge(
   }
 
   const searchTerms = buildSearchTerms(analysis);
+  let allowedContentIds: string[] | null = null;
+
+  if (analysis.requested_theme === "bakery") {
+    try {
+      const bakeryRows = await getBakeryChatKnowledgeRows();
+      allowedContentIds = bakeryRows.map((row) => row.metadata.contentid);
+      const unseenRows = bakeryRows.filter(
+        (row) =>
+          !seenPlaceTitles.some(
+            (seenTitle) => normalizeForSearch(seenTitle) === normalizeForSearch(row.title)
+          )
+      );
+      const unseenTitles = new Set(unseenRows.map((row) => normalizeForSearch(row.title)));
+      const candidates = unseenRows.length
+        ? [
+            ...unseenRows,
+            ...bakeryRows.filter((row) => !unseenTitles.has(normalizeForSearch(row.title)))
+          ]
+        : bakeryRows;
+      const rankedRows = rankKnowledgeRows(
+        candidates,
+        analysis,
+        searchTerms,
+        allowedContentIds
+      ).slice(0, 5);
+
+      if (rankedRows.length) {
+        return {
+          status: "ready",
+          rows: rankedRows,
+          message: `${rankedRows.length}개 빵집 장소 데이터 조회`,
+          searchMode: "keyword",
+          debug: createRagDebug({
+            rows: rankedRows,
+            searchMode: "keyword",
+            statusMessage: "다대유 빵집 장소 데이터 사용"
+          })
+        };
+      }
+    } catch {
+      return {
+        status: "unavailable",
+        rows: [],
+        message: "빵집 테마 조회 실패",
+        searchMode: "none",
+        debug: createRagDebug({
+          rows: [],
+          searchMode: "none",
+          statusMessage: "빵집 테마 조회 실패"
+        })
+      };
+    }
+
+    if (!allowedContentIds.length) {
+      return {
+        status: "empty",
+        rows: [],
+        message: "빵집 테마 조건 일치 없음",
+        searchMode: "none",
+        debug: createRagDebug({
+          rows: [],
+          searchMode: "none",
+          statusMessage: "빵집 테마 조건 일치 없음"
+        })
+      };
+    }
+  }
 
   const vectorKnowledge = await fetchVectorKnowledge(
     config,
     analysis,
     searchTerms,
-    seenPlaceTitles
+    seenPlaceTitles,
+    allowedContentIds
   );
   if (vectorKnowledge.status === "ready") {
     const facilityCategory = getRequestedFacilityCategory(searchTerms);
@@ -2243,7 +2461,8 @@ async function fetchKnowledge(
         config,
         analysis,
         searchTerms,
-        seenPlaceTitles
+        seenPlaceTitles,
+        allowedContentIds
       );
       if (
         facilityKnowledge.status === "ready" &&
@@ -2276,7 +2495,8 @@ async function fetchKnowledge(
     config,
     analysis,
     searchTerms,
-    seenPlaceTitles
+    seenPlaceTitles,
+    allowedContentIds
   );
   if (keywordKnowledge.status === "ready" && vectorKnowledge.status !== "not_configured") {
     const fallbackDebug =
@@ -2305,7 +2525,8 @@ async function fetchVectorKnowledge(
   config: ReturnType<typeof getSupabaseConfig>,
   analysis: QueryAnalysis,
   searchTerms: string[],
-  seenPlaceTitles: string[]
+  seenPlaceTitles: string[],
+  allowedContentIds: string[] | null
 ): Promise<KnowledgeResult> {
   const embedding = getEmbeddingConfig();
 
@@ -2410,7 +2631,7 @@ async function fetchVectorKnowledge(
     }
 
     const rankedRows = selectDiverseItems({
-      items: rankKnowledgeRows(rows, analysis, searchTerms),
+      items: rankKnowledgeRows(rows, analysis, searchTerms, allowedContentIds),
       getTitle: (row) => getRowText(row, "title") || "",
       limit: KNOWLEDGE_RESULT_LIMIT,
       seenTitles: seenPlaceTitles
@@ -2482,7 +2703,8 @@ async function fetchKeywordKnowledge(
   config: ReturnType<typeof getSupabaseConfig>,
   analysis: QueryAnalysis,
   searchTerms: string[],
-  seenPlaceTitles: string[]
+  seenPlaceTitles: string[],
+  allowedContentIds: string[] | null
 ): Promise<KnowledgeResult> {
   const params = new URLSearchParams({
     select: "*",
@@ -2536,7 +2758,7 @@ async function fetchKeywordKnowledge(
     }
 
     const rankedRows = selectDiverseItems({
-      items: rankKnowledgeRows(rows, analysis, searchTerms),
+      items: rankKnowledgeRows(rows, analysis, searchTerms, allowedContentIds),
       getTitle: (row) => getRowText(row, "title") || "",
       limit: KNOWLEDGE_RESULT_LIMIT,
       seenTitles: seenPlaceTitles
@@ -2597,6 +2819,10 @@ function buildSearchTerms(analysis: QueryAnalysis) {
       [
         analysis.place_name,
         analysis.location,
+        ...analysis.requested_categories,
+        ...(analysis.requested_theme === "bakery"
+          ? ["빵집", "베이커리", "제과점", "빵지순례"]
+          : []),
         ...analysis.keywords,
         ...analysis.accessibility_needs.flatMap((need) =>
           need === "wheelchair"
@@ -2607,9 +2833,17 @@ function buildSearchTerms(analysis: QueryAnalysis) {
                 ? ["짧은 동선", "가까운", "근처", "이동거리", "휴식"]
                 : need === "easy_explanation"
                   ? ["쉬운 설명", "간단한 안내", "핵심 정보", "안내"]
-                  : need === "elderly" || need === "mobility_access"
-                    ? ["이동약자", "계단", "경사로", "휴식"]
-                    : [need]
+                  : need === "accessible_toilet"
+                    ? ["장애인 화장실", "화장실"]
+                    : need === "accessible_parking"
+                      ? ["장애인 주차", "전용 주차", "주차장"]
+                      : need === "public_transport"
+                        ? ["대중교통", "저상버스", "정류장"]
+                        : need === "step_free"
+                          ? ["계단 없음", "단차 없음", "접근로", "경사로", "엘리베이터"]
+                          : need === "elderly" || need === "mobility_access"
+                            ? ["이동약자", "계단", "경사로", "휴식"]
+                            : [need]
         ),
         analysis.weather_sensitive ? "실내" : null,
         analysis.weather_sensitive ? "우천" : null
@@ -2850,11 +3084,30 @@ export async function POST(request: Request) {
       message,
       conversationContext
     );
+    const requestedCategories = resolveSessionChatCategories(message, history);
+    const requestedTheme = resolveSessionChatTheme(message, history);
+    const hasRecommendationCue = /(추천|갈\s*만|코스|일정|1박|당일|어디|둘러|위주)/u.test(message);
     const analysis: QueryAnalysis = {
       ...contextualAnalysis,
+      in_scope:
+        contextualAnalysis.in_scope || requestedCategories.length > 0 || requestedTheme !== null,
+      intent:
+        !contextualAnalysis.place_name &&
+        (requestedTheme !== null || (requestedCategories.length > 0 && hasRecommendationCue))
+          ? "recommend_place"
+          : contextualAnalysis.intent,
       accessibility_needs: Array.from(
         new Set([...contextualAnalysis.accessibility_needs, ...profileAccessibilityNeeds])
-      )
+      ),
+      keywords: Array.from(
+        new Set([
+          ...contextualAnalysis.keywords,
+          ...requestedCategories,
+          ...(requestedTheme === "bakery" ? ["빵집", "베이커리", "빵지순례"] : [])
+        ])
+      ).slice(0, 12),
+      requested_categories: requestedCategories,
+      requested_theme: requestedTheme
     };
 
     if (!analysis.in_scope) {

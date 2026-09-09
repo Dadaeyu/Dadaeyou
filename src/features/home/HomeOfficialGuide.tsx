@@ -96,7 +96,7 @@ function OfficialSourceLink({ source, index }: { source: OfficialSource; index: 
       href={source.href}
       target="_blank"
       rel="noreferrer"
-      className={`group focus-visible:outline-navy-500 relative flex min-h-16 items-center gap-3 border-slate-200/80 px-4 py-3.5 transition-colors hover:bg-slate-50 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] active:bg-slate-100 sm:min-h-[9.5rem] sm:flex-col sm:items-start sm:gap-4 sm:p-6 dark:border-white/10 dark:hover:bg-neutral-900 dark:active:bg-neutral-900 ${CARD_DIVIDER_CLASS[index] ?? ""}`}
+      className={`group focus-visible:outline-navy-500 border-hairline relative flex min-h-16 items-center gap-3 px-4 py-3.5 transition-colors hover:bg-slate-50 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] active:bg-slate-100 sm:min-h-[9.5rem] sm:flex-col sm:items-start sm:gap-4 sm:p-6 dark:hover:bg-neutral-900 dark:active:bg-neutral-900 ${CARD_DIVIDER_CLASS[index] ?? ""}`}
     >
       <span className="group-hover:bg-navy-50 group-hover:text-navy-700 group-focus-visible:bg-navy-50 group-focus-visible:text-navy-700 grid size-11 shrink-0 place-items-center rounded-2xl bg-slate-100 text-slate-700 ring-1 ring-slate-200 transition-colors dark:bg-neutral-900 dark:text-slate-200 dark:ring-white/10 dark:group-hover:bg-slate-800">
         <Icon className="h-5 w-5" aria-hidden="true" />

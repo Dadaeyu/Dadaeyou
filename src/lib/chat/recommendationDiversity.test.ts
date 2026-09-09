@@ -3,6 +3,12 @@ import test from "node:test";
 import { asksForSingleRecommendation, selectDiverseItems } from "./recommendationDiversity.ts";
 
 type Candidate = { id: string; title: string };
+type RecommendationDiversityModule = typeof import("./recommendationDiversity.ts") & {
+  resolveRequestedRecommendationLimit?: (
+    message: string,
+    options?: { defaultLimit?: number; maxLimit?: number }
+  ) => number;
+};
 
 const candidates: Candidate[] = [
   { id: "a-1", title: "천연기념물센터" },
@@ -56,4 +62,60 @@ test("새 후보가 부족하면 이전 장소도 뒤에서 보충한다", () =>
 test("'추천한 곳 말고'를 한 곳만 추천해 달라는 요청으로 오해하지 않는다", () => {
   assert.equal(asksForSingleRecommendation("방금 추천한 곳 말고 다른 곳도 추천해줘"), false);
   assert.equal(asksForSingleRecommendation("그중 한 곳만 추천해줘"), true);
+});
+
+async function loadRequestedRecommendationLimitResolver() {
+  const loadedModule =
+    (await import("./recommendationDiversity.ts")) as RecommendationDiversityModule;
+  const resolveRequestedRecommendationLimit = loadedModule.resolveRequestedRecommendationLimit;
+  assert.equal(
+    typeof resolveRequestedRecommendationLimit,
+    "function",
+    "recommendationDiversity.ts should export resolveRequestedRecommendationLimit"
+  );
+  return resolveRequestedRecommendationLimit as NonNullable<
+    RecommendationDiversityModule["resolveRequestedRecommendationLimit"]
+  >;
+}
+
+test("요청 문장에 숫자와 개 단위가 있으면 그 추천 개수를 사용한다", async () => {
+  const resolveRequestedRecommendationLimit = await loadRequestedRecommendationLimitResolver();
+
+  assert.equal(resolveRequestedRecommendationLimit("대전 문화시설 2개 추천해줘"), 2);
+});
+
+test("요청 문장에 한국어 수사와 곳 단위가 있으면 그 추천 개수를 사용한다", async () => {
+  const resolveRequestedRecommendationLimit = await loadRequestedRecommendationLimitResolver();
+
+  assert.equal(resolveRequestedRecommendationLimit("휠체어로 가기 좋은 곳 두 곳 추천해줘"), 2);
+});
+
+test("하나만 요청하면 추천 개수를 1로 해석한다", async () => {
+  const resolveRequestedRecommendationLimit = await loadRequestedRecommendationLimitResolver();
+
+  assert.equal(resolveRequestedRecommendationLimit("그중 하나만 추천해줘"), 1);
+});
+
+test("명시한 추천 개수가 최대값보다 크면 최대값으로 제한한다", async () => {
+  const resolveRequestedRecommendationLimit = await loadRequestedRecommendationLimitResolver();
+
+  assert.equal(
+    resolveRequestedRecommendationLimit("대전 여행지 10개 추천해줘", {
+      defaultLimit: 2,
+      maxLimit: 5
+    }),
+    5
+  );
+});
+
+test("명시한 추천 개수가 없으면 기본 추천 개수를 사용한다", async () => {
+  const resolveRequestedRecommendationLimit = await loadRequestedRecommendationLimitResolver();
+
+  assert.equal(
+    resolveRequestedRecommendationLimit("대전 문화시설 추천해줘", {
+      defaultLimit: 2,
+      maxLimit: 5
+    }),
+    2
+  );
 });

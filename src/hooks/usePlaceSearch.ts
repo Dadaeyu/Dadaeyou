@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchKakaoPlaces, type SearchPlace } from "@/lib/search/kakaoSearch";
+import {
+  getFocusedPlaceAfterSearch,
+  mergeFocusedPlaceIntoSearchResults
+} from "@/lib/search/mapDeepLinkState";
 
 export interface TourismDetail {
   title: string;
@@ -12,6 +16,8 @@ export interface TourismDetail {
   overview: string | null;
   use_time: string | null;
   rest_date: string | null;
+  event_start_date: string | null; // 축제/공연/행사(lclssystm1='EV') 전용 — YYYYMMDD
+  event_end_date: string | null;
   phone: string | null;
   like_count: number;
   accessibility: { category: string; items: { label: string; text: string }[] }[];
@@ -77,6 +83,8 @@ export function usePlaceSearch({
   });
   const [searchPage, setSearchPage] = useState(0);
   const [searchDetailId, setSearchDetailId] = useState<string | null>(null);
+  const [focusedPlace, setFocusedPlace] = useState<SearchPlace | null>(null);
+  const focusedPlaceRef = useRef<SearchPlace | null>(null);
   const [areaCodes, setAreaCodes] = useState<AreaCode[]>([]);
 
   // 입력창을 지웠는데 Enter를 안 눌러도, 실제 검색에 쓰이는 키워드를 바로 비워서
@@ -253,6 +261,7 @@ export function usePlaceSearch({
     // searchKey(검색어·필터)가 바뀐 경우엔 페이지를 1페이지로 되돌린다.
     // 페이지 버튼만 눌러 searchPage 만 바뀐 경우엔 지도 줌도 리셋하지 않는다.
     const isNewSearch = prevSearchKeyRef.current !== searchKey;
+    const explicitUserSearch = isNewSearch && !skipReset;
     prevSearchKeyRef.current = searchKey;
     const pageToFetch = isNewSearch ? 0 : searchPage;
     if (isNewSearch && searchPage !== 0) setSearchPage(0);
@@ -277,8 +286,21 @@ export function usePlaceSearch({
       controller.signal
     )
       .then(({ liked, places, total }) => {
-        setSearchResult({ key: searchKey, places, total });
-        setSearchDetailId(null);
+        const nextFocusedPlace = getFocusedPlaceAfterSearch({
+          currentFocusedPlace: focusedPlaceRef.current,
+          explicitUserSearch
+        });
+        focusedPlaceRef.current = nextFocusedPlace;
+        setFocusedPlace(nextFocusedPlace);
+        setSearchResult({
+          key: searchKey,
+          places: mergeFocusedPlaceIntoSearchResults({
+            focusedPlace: nextFocusedPlace,
+            searchPlaces: places
+          }),
+          total
+        });
+        if (explicitUserSearch) setSearchDetailId(null);
         if (liked) setLikedPlaces(liked);
         // "결과가 하나라도 지금 화면에 보이면 리셋하지 않는다"는 판단은 여기서 총 결과 개수만
         // 보고는 할 수 없다(27개가 있어도 전부 화면 밖일 수 있음) — 실제 지도 뷰포트를 아는
@@ -288,8 +310,21 @@ export function usePlaceSearch({
       })
       .catch((error: unknown) => {
         if (!isAbortError(error)) {
-          setSearchResult({ key: searchKey, places: [], total: 0 });
-          setSearchDetailId(null);
+          const nextFocusedPlace = getFocusedPlaceAfterSearch({
+            currentFocusedPlace: focusedPlaceRef.current,
+            explicitUserSearch
+          });
+          focusedPlaceRef.current = nextFocusedPlace;
+          setFocusedPlace(nextFocusedPlace);
+          setSearchResult({
+            key: searchKey,
+            places: mergeFocusedPlaceIntoSearchResults({
+              focusedPlace: nextFocusedPlace,
+              searchPlaces: []
+            }),
+            total: 0
+          });
+          if (explicitUserSearch) setSearchDetailId(null);
           if (isNewSearch && !skipReset) setMapResetTrigger((count) => count + 1);
         }
       });
@@ -297,23 +332,45 @@ export function usePlaceSearch({
     return () => controller.abort();
   }, [
     accessibility,
+    dateFrom,
+    dateTo,
     dong,
     favoritesOnly,
     gu,
+    headcount,
+    minRating,
     searchKey,
     searchRequest.keyword,
     selectedGuCode,
-    searchPage
+    searchPage,
+    themes
   ]);
 
-  const handleSearch = useCallback((nextKeyword: string) => {
-    setSearchRequest((current) => ({
-      keyword: nextKeyword,
-      revision: current.revision + 1
-    }));
+  const clearFocusedPlace = useCallback(() => {
+    focusedPlaceRef.current = null;
+    setFocusedPlace(null);
+    setSearchDetailId(null);
   }, []);
 
-  const searchPlaces = searchResult.places;
+  const handleSearch = useCallback(
+    (nextKeyword: string) => {
+      clearFocusedPlace();
+      setSearchRequest((current) => ({
+        keyword: nextKeyword,
+        revision: current.revision + 1
+      }));
+    },
+    [clearFocusedPlace]
+  );
+
+  const searchPlaces = useMemo(
+    () =>
+      mergeFocusedPlaceIntoSearchResults({
+        focusedPlace,
+        searchPlaces: searchResult.places
+      }),
+    [focusedPlace, searchResult.places]
+  );
   const isSearching = searchResult.key !== searchKey;
 
   const searchDetail = searchDetailId
@@ -366,9 +423,14 @@ export function usePlaceSearch({
       if (!found) return;
 
       const place: SearchPlace = { ...found, source: "db" };
+      focusedPlaceRef.current = place;
+      setFocusedPlace(place);
       setSearchResult((current) => ({
         ...current,
-        places: [place, ...current.places.filter((item) => item.id !== place.id)]
+        places: mergeFocusedPlaceIntoSearchResults({
+          focusedPlace: place,
+          searchPlaces: current.places
+        })
       }));
       setSearchDetailId(place.id);
     } catch {
@@ -392,6 +454,7 @@ export function usePlaceSearch({
     isLoadingDetail,
     handleSearch,
     focusPlaceById,
+    focusedPlace,
     topRatedPlaces,
     isLoadingTopRated,
     hasActiveFilter,

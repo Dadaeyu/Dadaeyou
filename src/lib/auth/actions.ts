@@ -236,6 +236,10 @@ export async function updatePassword(newPassword: string) {
 }
 
 export async function signInWithOAuth(provider: OAuthProvider, next?: string) {
+  const supabase = createClient();
+  // 기존 세션이 있으면 카카오·구글 identity가 그 계정에 붙는다. 소셜은 항상 새 로그인으로 시작한다.
+  await supabase.auth.signOut().catch(() => {});
+
   if (provider === "naver") {
     const url = new URL("/auth/naver", window.location.origin);
     if (next) url.searchParams.set("next", next);
@@ -246,8 +250,8 @@ export async function signInWithOAuth(provider: OAuthProvider, next?: string) {
     } as { data: { provider: string; url: string }; error: null };
   }
 
-  const supabase = createClient();
   const redirectTo = new URL("/auth/callback", window.location.origin);
+  redirectTo.searchParams.set("provider", provider);
   if (next) redirectTo.searchParams.set("next", next);
 
   const options: {
@@ -258,7 +262,10 @@ export async function signInWithOAuth(provider: OAuthProvider, next?: string) {
   };
 
   if (provider === "kakao") {
-    options.queryParams = { lang: "ko" };
+    // prompt=login: 카카오에 이미 로그인돼 있어도 계정 재선택/재로그인
+    options.queryParams = { lang: "ko", prompt: "login" };
+  } else if (provider === "google") {
+    options.queryParams = { prompt: "select_account" };
   }
 
   return supabase.auth.signInWithOAuth({
@@ -288,14 +295,4 @@ export async function resolvePostLoginPath(next: string): Promise<string> {
   return resolveAuthDestination(supabase, user.id, next);
 }
 
-/** OAuth 제공자 여부 (이메일 가입자는 provider가 email) */
-export function isOAuthUser(user: {
-  app_metadata?: { provider?: string; providers?: string[] };
-}): boolean {
-  const providers = user.app_metadata?.providers ?? [];
-  if (providers.length > 0) {
-    return providers.some((p) => p !== "email");
-  }
-  const provider = user.app_metadata?.provider;
-  return !!provider && provider !== "email";
-}
+export { isOAuthUser, hasEmailPasswordAuth } from "@/lib/auth/auth-kind";

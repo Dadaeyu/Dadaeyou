@@ -33,8 +33,8 @@ export default function SearchResultList({
             key={sp.id}
             onClick={() => onSelect(sp.id)}
             aria-label={resultAriaLabel}
-            data-speak-group="true"
-            className="group w-full border-b border-gray-50 px-4 py-3 text-left transition-colors hover:bg-gray-50"
+            data-speakable="true"
+            className="border-hairline group w-full border-b px-4 py-3 text-left transition-colors hover:bg-gray-50"
           >
             <div className="flex items-start gap-2">
               {sp.image ? (

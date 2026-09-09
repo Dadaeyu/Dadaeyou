@@ -12,25 +12,8 @@ import {
   PASSWORD_RULES_HINT
 } from "@/lib/auth/password";
 import { Button } from "@/components/ui/Button";
-
-function hasEmailPasswordAuth(
-  user: {
-    email?: string | null;
-    identities?: { provider: string }[] | null;
-    app_metadata?: { provider?: string; providers?: string[] };
-  } | null
-): boolean {
-  if (!user) return false;
-  if (user.identities?.some((identity) => identity.provider === "email")) return true;
-  const providers = user.app_metadata?.providers ?? [];
-  if (providers.length > 0) return providers.includes("email");
-  // identities/providers가 비어 있으면 이메일 값이 있는 경우를 email 가입으로 본다
-  if (user.email) {
-    const provider = user.app_metadata?.provider ?? "email";
-    return provider === "email";
-  }
-  return false;
-}
+import { hasEmailPasswordAuth } from "@/lib/auth/auth-kind";
+import { displayEmailFromAuthUser } from "@/lib/auth/display-email";
 
 const inputClass =
   "border-hairline bg-background text-ink placeholder:text-stone focus:ring-brand-500 w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:outline-none";
@@ -128,12 +111,12 @@ export function AccountSection() {
 
   return (
     <div className="max-w-xl space-y-6">
-      <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+      <div className="border-hairline rounded-xl border bg-gray-50 px-4 py-3">
         <p className="text-steel text-xs font-semibold">이메일</p>
-        <p className="text-ink mt-1 text-sm font-medium">{user?.email ?? "—"}</p>
+        <p className="text-ink mt-1 text-sm font-medium">{displayEmailFromAuthUser(user) || "—"}</p>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+      <div className="border-hairline rounded-xl border bg-gray-50 px-4 py-3">
         <p className="text-steel text-xs font-semibold">닉네임</p>
         <p className="text-ink mt-1 text-sm font-medium">{member?.nickname ?? "—"}</p>
       </div>

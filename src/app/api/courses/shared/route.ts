@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { T } from "@/lib/supabase/tables";
 import type { TourismCoursePlace, TourismSharedCourse } from "@/lib/supabase/types";
 import { getBakeryPlaceIds, splitThemeSelection, BAKERY_THEME_CODE } from "@/lib/theme/bakeryTheme";
+import { normalizeContentIds } from "@/lib/chat/discoveryLinks";
 
 export const dynamic = "force-dynamic";
 
@@ -394,6 +395,7 @@ export async function GET(request: Request) {
     const dateFrom = (url.searchParams.get("dateFrom") ?? "").trim();
     const dateTo = (url.searchParams.get("dateTo") ?? "").trim();
     const minRating = Number(url.searchParams.get("minRating") ?? "0");
+    const contentIds = normalizeContentIds((url.searchParams.get("contentIds") ?? "").split(","));
     const mine = url.searchParams.get("mine") === "1";
     const { field: sortField, ascending: sortAscending } = resolveSort(
       url.searchParams.get("sort")
@@ -434,16 +436,28 @@ export async function GET(request: Request) {
     // 접근성/테마/위치 필터 — 각각 매치되는 코스 id 집합을 구해서 교집합(여러 개 선택했으면 AND).
     // 접근성/테마는 "하나라도 매치"(OR)지만, 위치는 "포함된 모든 장소가 매치"(courseIdsWithAllPlacesInLocation 안에서 이미 AND 처리됨).
     let placeFilterCourseIds: Set<number> | null = null;
-    if (accessTypes.length > 0 || themeCodesFilter.length > 0 || gu || minRating > 0) {
-      const [themeMatched, accessMatched, locationMatched, ratingMatched] = await Promise.all([
-        themeCodesFilter.length > 0 ? courseIdsMatchingThemes(admin, themeCodesFilter) : null,
-        accessTypes.length > 0 ? courseIdsMatchingAccessibility(admin, accessTypes) : null,
-        gu ? courseIdsWithAllPlacesInLocation(admin, gu, dong) : null,
-        minRating > 0 ? courseIdsMatchingMinRating(admin, minRating) : null
-      ]);
-      const activeSets = [themeMatched, accessMatched, locationMatched, ratingMatched].filter(
-        (s): s is Set<number> => s !== null
-      );
+    if (
+      accessTypes.length > 0 ||
+      themeCodesFilter.length > 0 ||
+      gu ||
+      minRating > 0 ||
+      contentIds.length > 0
+    ) {
+      const [themeMatched, accessMatched, locationMatched, ratingMatched, contentMatched] =
+        await Promise.all([
+          themeCodesFilter.length > 0 ? courseIdsMatchingThemes(admin, themeCodesFilter) : null,
+          accessTypes.length > 0 ? courseIdsMatchingAccessibility(admin, accessTypes) : null,
+          gu ? courseIdsWithAllPlacesInLocation(admin, gu, dong) : null,
+          minRating > 0 ? courseIdsMatchingMinRating(admin, minRating) : null,
+          contentIds.length > 0 ? courseIdsContainingContentIds(admin, contentIds) : null
+        ]);
+      const activeSets = [
+        themeMatched,
+        accessMatched,
+        locationMatched,
+        ratingMatched,
+        contentMatched
+      ].filter((s): s is Set<number> => s !== null);
       placeFilterCourseIds = activeSets.reduce<Set<number> | null>(
         (acc, s) => (acc ? new Set([...acc].filter((id) => s.has(id))) : s),
         null

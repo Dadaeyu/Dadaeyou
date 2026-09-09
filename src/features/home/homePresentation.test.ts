@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as homePresentation from "./homePresentation.ts";
 import {
+  buildHomePlaceMapHref,
   cleanHomePresentationText,
   formatHomeDetailValue,
   formatHomeEventPeriod,
@@ -12,6 +14,22 @@ import {
   summarizeHomeEvidence
 } from "./homePresentation.ts";
 
+type HomeFallbackCopyBuilder = (options: { compact?: boolean }) => {
+  title: string;
+  description: string | null;
+};
+
+const presentationWithFallbackCopy = homePresentation as typeof homePresentation & {
+  buildHomeFallbackCopy?: HomeFallbackCopyBuilder;
+};
+
+test("홈 장소 지도 링크는 정확한 장소 ID와 검색 대체값을 함께 전달한다", () => {
+  assert.equal(
+    buildHomePlaceMapHref({ id: " 12345 ", title: " 한밭수목원 " }),
+    "/map?contentId=12345&query=%ED%95%9C%EB%B0%AD%EC%88%98%EB%AA%A9%EC%9B%90"
+  );
+});
+
 test("추천 장소는 입력 순서를 유지한 대표 1곳과 보조 최대 3곳으로 나눈다", () => {
   assert.deepEqual(splitHomeRecommendationPlaces(["a", "b", "c", "d", "e"]), {
     featured: "a",
@@ -21,6 +39,19 @@ test("추천 장소는 입력 순서를 유지한 대표 1곳과 보조 최대 3
     featured: null,
     supporting: []
   });
+});
+
+test("compact fallback card copy omits the regular long title and description", () => {
+  assert.equal(typeof presentationWithFallbackCopy.buildHomeFallbackCopy, "function");
+
+  const buildFallbackCopy = presentationWithFallbackCopy.buildHomeFallbackCopy;
+  const compactCopy = buildFallbackCopy({ compact: true });
+  const regularCopy = buildFallbackCopy({});
+
+  assert.notEqual(compactCopy.title, regularCopy.title);
+  assert.equal(compactCopy.description, null);
+  assert.match(regularCopy.title, /장소/u);
+  assert.match(regularCopy.description ?? "", /주소|방문|확인/u);
 });
 
 test("관광공사 HTTP 이미지는 홈 프록시가 허용하는 HTTPS 주소로 바꾼다", () => {

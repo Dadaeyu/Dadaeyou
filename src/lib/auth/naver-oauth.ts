@@ -20,7 +20,8 @@ export function buildNaverAuthorizeUrl(origin: string, state: string): string {
     response_type: "code",
     client_id: clientId,
     redirect_uri: getNaverRedirectUri(origin),
-    state
+    state,
+    auth_type: "reauthenticate"
   });
   return `https://nid.naver.com/oauth2.0/authorize?${params}`;
 }
@@ -54,9 +55,11 @@ export async function exchangeNaverCode(code: string, state: string): Promise<st
   return data.access_token;
 }
 
-export function resolveNaverAuthEmail(sub: string, email: unknown): string {
-  if (typeof email === "string" && email.trim()) {
-    return email.trim().toLowerCase();
-  }
-  return `naver_${sub}@oauth.dadaeyu.invalid`;
+/** Auth users.email 전용. 카카오·구글·이메일 가입과 절대 겹치지 않게 네이버 id로만 만든다. */
+export function naverAuthEmail(sub: string) {
+  return `naver_${String(sub).trim()}@oauth.dadaeyu.invalid`;
+}
+
+export function resolveNaverAuthEmail(sub: string, _email?: unknown): string {
+  return naverAuthEmail(sub);
 }

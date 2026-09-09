@@ -37,3 +37,16 @@ test("탈퇴 상태가 된 뒤 오류가 나도 현재 세션을 종료한다", 
     /if \(authError\)[\s\S]*await supabase\.auth\.signOut\(\)[\s\S]*return jsonError/u
   );
 });
+
+test("소셜 계정 탈퇴는 비밀번호가 아니라 확인 문구로 판별한다", () => {
+  assert.match(routeSource, /hasEmailPasswordAuth\(authUserData\?\.user \?\? user\)/u);
+  assert.doesNotMatch(routeSource, /if \(user\.email\)[\s\S]*provider \?\? ["']email["']/u);
+});
+
+test("회원 탈퇴 시 소셜 identity를 해제해 같은 카카오·구글 계정으로 재가입할 수 있게 한다", () => {
+  assert.match(routeSource, /unlinkAuthIdentities\(user\.id\)/u);
+});
+
+test("회원 탈퇴 시 네이버 id를 지워 같은 네이버 계정으로 바로 재가입할 수 있게 한다", () => {
+  assert.match(routeSource, /naver_id:\s*retiredNaverIdMarker\(user\.id\)/u);
+});

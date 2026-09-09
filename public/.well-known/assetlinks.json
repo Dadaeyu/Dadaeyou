@@ -4,7 +4,9 @@
       "namespace": "android_app",
       "package_name": "com.dadaeyou.app",
       "sha256_cert_fingerprints": [
-        "AB:54:5D:67:99:AF:7C:71:65:97:EA:D8:C2:16:FE:73:A6:C2:1F:01:74:1A:8A:51:82:A8:98:A0:04:06:B8:7C"
+        "50:D8:F3:CA:1A:41:73:30:13:84:0E:21:23:72:7C:1C:9B:3D:73:35:0C:DD:D1:34:01:CA:B4:54:38:5B:4E:57",
+        "AB:54:5D:67:99:AF:7C:71:65:97:EA:D8:C2:16:FE:73:A6:C2:1F:01:74:1A:8A:51:82:A8:98:A0:04:06:B8:7C",
+        "8A:E2:7B:BB:05:05:25:AB:A6:60:85:75:9F:E4:08:D1:C4:E1:E7:7A:7B:9C:DE:B1:46:0E:73:9E:E1:0C:0B:0C"
       ]
     },
     "relation": ["delegate_permission/common.handle_all_urls"]

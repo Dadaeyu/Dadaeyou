@@ -3,25 +3,13 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { WITHDRAW_CONFIRM_TEXT } from "@/lib/auth/withdraw";
+import { hasEmailPasswordAuth } from "@/lib/auth/auth-kind";
+import { retiredNaverIdMarker } from "@/lib/auth/naver-session-helpers";
+import { unlinkAuthIdentities } from "@/lib/auth/unlink-identities";
 import { T } from "@/lib/supabase/tables";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
-}
-
-function hasEmailPassword(user: {
-  email?: string | null;
-  identities?: { provider: string }[] | null;
-  app_metadata?: { provider?: string; providers?: string[] };
-}): boolean {
-  if (user.identities?.some((i) => i.provider === "email")) return true;
-  const providers = user.app_metadata?.providers ?? [];
-  if (providers.length > 0) return providers.includes("email");
-  if (user.email) {
-    const provider = user.app_metadata?.provider ?? "email";
-    return provider === "email";
-  }
-  return false;
 }
 
 /** 회원 탈퇴: 익명화 + withdrawn + Auth 이메일 해제·ban */
@@ -59,8 +47,9 @@ export async function POST(request: Request) {
     return jsonError("이미 탈퇴한 계정입니다.", 400);
   }
 
-  // 이메일 identity가 있으면 비밀번호로 확인, 소셜만 있으면 확인 문구
-  const requirePassword = hasEmailPassword(user);
+  // JWT identities가 email로 보이는 네이버 계정이 있어 Auth 전체 유저로 다시 판별한다.
+  const { data: authUserData } = await admin.auth.admin.getUserById(user.id);
+  const requirePassword = hasEmailPasswordAuth(authUserData?.user ?? user);
 
   if (requirePassword) {
     const password = typeof body.password === "string" ? body.password : "";
@@ -196,6 +185,13 @@ export async function POST(request: Request) {
     }
   }
 
+  // 카카오·구글 identity가 남으면 재로그인 시 이 탈퇴 계정에 묶여 가입이 실패한다.
+  const { error: unlinkError } = await unlinkAuthIdentities(user.id);
+  if (unlinkError) {
+    await supabase.auth.signOut();
+    return jsonError("소셜 연동 해제에 실패했습니다. 운영팀에 문의해 주세요.", 500);
+  }
+
   const { error: authError } = await admin.auth.admin.updateUserById(user.id, {
     email: anonEmail,
     ban_duration: "876000h",
@@ -208,6 +204,7 @@ export async function POST(request: Request) {
       full_name: null,
       theme_preferences: [],
       accessibility_needs: [],
+      naver_id: retiredNaverIdMarker(user.id),
       withdrawn: true
     }
   });

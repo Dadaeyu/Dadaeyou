@@ -2,19 +2,34 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
+import { useAccessibility } from "@/context/AccessibilityContext";
 import { useTextToSpeech } from "@/hooks/useTextToSpeech";
+import type { TourismSharedCourse } from "@/lib/supabase/types";
+import { HomePlaceImage } from "@/features/home/HomePlaceImage";
+import {
+  buildInternalPlaceMapHref,
+  buildRelatedCourseQuery,
+  isCourseRecommendationRequest
+} from "@/lib/chat/discoveryLinks";
 import {
   formatChatAccessibilityText,
   formatChatDisplayText,
   getPublicChatSourceLabel
 } from "@/lib/chat/presentation";
+import { getChatScrollTarget } from "@/lib/chat/scrollTarget";
+import { requestChatJson } from "@/lib/chat/client-request";
 import {
   Accessibility,
+  ArrowRight,
+  Heart,
   MapPin,
   MessageCircle,
   Mic,
   MicOff,
+  Route,
   Send,
+  Star,
   Volume2,
   VolumeX,
   X
@@ -30,6 +45,7 @@ type ChatResponse = {
     source: string;
   };
   places?: PlaceRecommendation[];
+  courses?: TourismSharedCourse[];
   chips: string[];
   confidence: Confidence;
   sources: string[];
@@ -43,6 +59,7 @@ type ChatResponse = {
 };
 
 type PlaceRecommendation = {
+  contentId: string | null;
   title: string;
   category: string | null;
   address: string | null;
@@ -174,8 +191,6 @@ const INITIAL_RESPONSE: ChatResponse = {
 
 const DAIYU_AVATAR_SRC = "/daiyu-avatar.png";
 const DAIYU_PROFILE_SRC = "/daiyu-profile.png";
-const CHAT_SESSION_STORAGE_KEY = "daiyu-chat-session";
-const MAX_STORED_MESSAGES = 30;
 const MAX_HISTORY_ITEMS = 10;
 
 interface Props {
@@ -184,20 +199,22 @@ interface Props {
 }
 
 export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
+  const { readAloud } = useAccessibility();
   const [messages, setMessages] = useState<Message[]>([
     { id: 1, role: "assistant", content: INITIAL_RESPONSE }
   ]);
-  const [isSessionReady, setIsSessionReady] = useState(false);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isAutoTtsEnabled, setIsAutoTtsEnabled] = useState(false);
+  const [isAutoTtsEnabled, setIsAutoTtsEnabled] = useState(readAloud);
   const [speakingMessageId, setSpeakingMessageId] = useState<number | null>(null);
   const [sttSupported, setSttSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isConversationMode, setIsConversationMode] = useState(false);
   const [voiceInputStatus, setVoiceInputStatus] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const latestMessageRef = useRef<HTMLDivElement>(null);
+  const [requestNotice, setRequestNotice] = useState("");
+  const [retryQuestion, setRetryQuestion] = useState("");
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const scrollAnchorRef = useRef<HTMLDivElement>(null);
   const lastAutoSpokenMessageIdRef = useRef<number | null>(null);
   const nextIdRef = useRef(1);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -206,6 +223,11 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
   const isLoadingRef = useRef(false);
   const voiceSessionIdRef = useRef(0);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const activeRequestRef = useRef<AbortController | null>(null);
+  const pendingQuestionRef = useRef("");
+  const pendingUserMessageIdRef = useRef<number | null>(null);
+  const relatedRequestsRef = useRef(new Set<AbortController>());
+  const speechRequestIdRef = useRef(0);
   const {
     isAvailable: ttsSupported,
     speak: speakWithTts,
@@ -219,6 +241,7 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
   }
 
   useEffect(() => {
+    const relatedRequests = relatedRequestsRef.current;
     const timerId = window.setTimeout(() => {
       setSttSupported(Boolean(getSpeechRecognitionConstructor()));
     }, 0);
@@ -227,18 +250,11 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
       window.clearTimeout(timerId);
       clearConversationRestartTimer();
       recognitionRef.current?.abort();
+      activeRequestRef.current?.abort();
+      activeRequestRef.current = null;
+      for (const controller of relatedRequests) controller.abort();
+      relatedRequests.clear();
     };
-  }, []);
-
-  useEffect(() => {
-    const timerId = window.setTimeout(() => {
-      const storedMessages = getStoredChatMessages();
-      setMessages(storedMessages);
-      nextIdRef.current = getLatestMessageId(storedMessages);
-      setIsSessionReady(true);
-    }, 0);
-
-    return () => window.clearTimeout(timerId);
   }, []);
 
   useEffect(() => {
@@ -250,30 +266,28 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
   }, [isLoading]);
 
   useEffect(() => {
-    if (!isSessionReady) return;
+    const scrollTarget = getChatScrollTarget(messages, isLoading);
+    const messageList = messageListRef.current;
 
-    try {
-      window.sessionStorage.setItem(
-        CHAT_SESSION_STORAGE_KEY,
-        JSON.stringify(messages.slice(-MAX_STORED_MESSAGES))
-      );
-    } catch {
-      // The current conversation still works when session storage is unavailable.
-    }
-  }, [isSessionReady, messages]);
+    if (!messageList) return;
 
-  useEffect(() => {
-    const latestMessage = messages[messages.length - 1];
-    if (latestMessage?.role === "assistant" && messages.length > 1 && !isLoading) {
-      latestMessageRef.current?.scrollIntoView({
-        block: "start",
+    if (scrollTarget.kind === "message" && scrollAnchorRef.current) {
+      const anchorRect = scrollAnchorRef.current.getBoundingClientRect();
+      const listRect = messageList.getBoundingClientRect();
+      const anchorTopInList = anchorRect.top - listRect.top + messageList.scrollTop;
+
+      messageList.scrollTo({
+        top: Math.max(0, anchorTopInList - 12),
         behavior: "smooth"
       });
       return;
     }
 
-    bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
   }, [messages, isLoading]);
+
+  const scrollTarget = getChatScrollTarget(messages, isLoading);
+  const scrollTargetMessageId = scrollTarget.kind === "message" ? scrollTarget.messageId : null;
 
   const stopSpeech = useCallback(() => {
     stopTts();
@@ -301,6 +315,7 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
         onDone?.();
       };
 
+      stopTts();
       setSpeakingMessageId(messageId);
       void speakWithTts({
         text,
@@ -311,7 +326,7 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
         }
       });
     },
-    [speakWithTts, ttsSupported]
+    [speakWithTts, stopTts, ttsSupported]
   );
 
   useEffect(() => {
@@ -332,26 +347,39 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
     startSpeech(latestMessage.id, latestMessage.content.message);
   }, [isAutoTtsEnabled, isLoading, messages, startSpeech, ttsSupported]);
 
-  function speakMessage(messageId: number, text: string) {
+  async function speakMessage(messageId: number, text: string) {
     if (speakingMessageId === messageId) {
       stopSpeech();
+      return;
+    }
+
+    stopSpeech();
+    const unlocked = await unlockTts();
+    if (!unlocked) {
+      setVoiceInputStatus("브라우저에서 음성 재생이 차단되었어요. 다시 눌러주세요.");
       return;
     }
 
     startSpeech(messageId, text);
   }
 
-  function toggleAutoTts() {
+  async function toggleAutoTts() {
     if (!ttsSupported || isConversationMode) return;
 
-    const nextValue = !isAutoTtsEnabled;
-    setIsAutoTtsEnabled(nextValue);
-
-    if (!nextValue) {
+    if (isAutoTtsEnabled) {
+      setIsAutoTtsEnabled(false);
       stopSpeech();
       return;
     }
 
+    stopSpeech();
+    const unlocked = await unlockTts();
+    if (!unlocked) {
+      setVoiceInputStatus("브라우저에서 자동 읽기를 시작하지 못했어요. 다시 눌러주세요.");
+      return;
+    }
+
+    setIsAutoTtsEnabled(true);
     const latestAssistantMessage = messages.findLast(
       (message): message is Extract<Message, { role: "assistant" }> => message.role === "assistant"
     );
@@ -522,48 +550,127 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
     }, delay);
   }
 
-  async function readChatErrorMessage(response: Response) {
-    try {
-      const data = (await response.json()) as { error?: unknown; message?: unknown };
-      if (typeof data.error === "string" && data.error.trim()) return data.error.trim();
-      if (typeof data.message === "string" && data.message.trim()) return data.message.trim();
-    } catch {
-      return "";
-    }
+  async function loadRelatedCourses(messageId: number, data: ChatResponse, question: string) {
+    const contentIds = (data.places ?? []).flatMap((place) =>
+      place.contentId ? [place.contentId] : []
+    );
+    const courseRequested = isCourseRecommendationRequest(question);
+    if (!contentIds.length && !courseRequested) return;
 
-    return "";
+    const controller = new AbortController();
+    relatedRequestsRef.current.add(controller);
+    try {
+      const init = {
+        signal: controller.signal,
+        credentials: "same-origin",
+        cache: "no-store"
+      } as const;
+      let payload = await requestChatJson<{ items?: TourismSharedCourse[] }>(
+        buildRelatedCourseQuery(contentIds),
+        init,
+        8_000
+      );
+      if (!payload.items?.length && courseRequested && contentIds.length) {
+        payload = await requestChatJson<{ items?: TourismSharedCourse[] }>(
+          buildRelatedCourseQuery([]),
+          init,
+          8_000
+        );
+      }
+      if (controller.signal.aborted || !payload.items?.length) return;
+      const courses = payload.items;
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === messageId && message.role === "assistant"
+            ? { ...message, content: { ...message.content, courses } }
+            : message
+        )
+      );
+    } catch {
+      // 관련 코스를 받지 못해도 먼저 표시한 장소 답변은 유지한다.
+    } finally {
+      relatedRequestsRef.current.delete(controller);
+    }
+  }
+
+  function cancelRequest() {
+    const controller = activeRequestRef.current;
+    if (!controller) return;
+    activeRequestRef.current = null;
+    controller.abort();
+    speechRequestIdRef.current += 1;
+    isLoadingRef.current = false;
+    setIsLoading(false);
+    setInput(pendingQuestionRef.current);
+    setRetryQuestion(pendingQuestionRef.current);
+    setRequestNotice("답변 요청을 취소했어요. 질문을 수정하거나 다시 시도할 수 있어요.");
+    conversationModeRef.current = false;
+    setIsConversationMode(false);
+    clearConversationRestartTimer();
+    abortVoiceInput();
+    stopSpeech();
   }
 
   async function sendMessage(message: string, options: { continueConversation?: boolean } = {}) {
     const text = message.trim();
     if (!text || isLoadingRef.current) return;
-    const history = buildChatHistory(messages);
+    const controller = new AbortController();
+    activeRequestRef.current = controller;
+    const speechRequestId = speechRequestIdRef.current + 1;
+    speechRequestIdRef.current = speechRequestId;
+    pendingQuestionRef.current = text;
+    setRequestNotice("");
+    setRetryQuestion("");
+    const retryMessageId = pendingUserMessageIdRef.current;
+    const history = buildChatHistory(messages.filter((entry) => entry.id !== retryMessageId));
+    const userMessageId = retryMessageId ?? nextId();
+    pendingUserMessageIdRef.current = userMessageId;
+    const shouldReadTypedQuestion = readAloud && !options.continueConversation;
+    const shouldUnlockTts =
+      ttsSupported && (isAutoTtsEnabled || shouldReadTypedQuestion || options.continueConversation);
 
     abortVoiceInput();
     stopSpeech();
-    setMessages((current) => [...current, { id: nextId(), role: "user", text }]);
+    const ttsUnlockPromise = shouldUnlockTts ? unlockTts() : Promise.resolve(true);
+    setMessages((current) => [
+      ...current.filter((entry) => entry.id !== retryMessageId),
+      { id: userMessageId, role: "user", text }
+    ]);
     setInput("");
     isLoadingRef.current = true;
     setIsLoading(true);
 
+    void (async () => {
+      const ttsUnlocked = await ttsUnlockPromise;
+      if (speechRequestIdRef.current !== speechRequestId || controller.signal.aborted) return;
+      if (shouldUnlockTts && !ttsUnlocked) {
+        setVoiceInputStatus(
+          "브라우저에서 자동 읽기를 시작하지 못했어요. 답변의 읽기 버튼을 눌러주세요."
+        );
+      } else if (shouldReadTypedQuestion && ttsSupported) {
+        startSpeech(userMessageId, text);
+      }
+    })().catch(() => {
+      if (speechRequestIdRef.current === speechRequestId && !controller.signal.aborted) {
+        setVoiceInputStatus("음성 재생을 준비하지 못했어요. 답변의 읽기 버튼을 눌러주세요.");
+      }
+    });
+
     try {
-      const response = await fetch("/api/chat", {
+      const data = await requestChatJson<ChatResponse>("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, accessibilityNeeds, history })
+        body: JSON.stringify({ message: text, accessibilityNeeds, history }),
+        signal: controller.signal
       });
-
-      if (!response.ok) {
-        const errorMessage = await readChatErrorMessage(response);
-        throw new Error(errorMessage || "chat request failed");
-      }
-
-      const data = (await response.json()) as ChatResponse;
+      if (activeRequestRef.current !== controller || controller.signal.aborted) return;
+      pendingUserMessageIdRef.current = null;
       const assistantMessageId = nextId();
       setMessages((current) => [
         ...current,
         { id: assistantMessageId, role: "assistant", content: data }
       ]);
+      void loadRelatedCourses(assistantMessageId, data, text);
 
       if (options.continueConversation && conversationModeRef.current) {
         startSpeech(assistantMessageId, data.message, () => {
@@ -573,35 +680,22 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
         });
       }
     } catch (error) {
-      const errorMessageId = nextId();
-      const errorResponse: ChatResponse = {
-        message:
-          error instanceof Error && error.message && error.message !== "chat request failed"
-            ? error.message
-            : "응답을 만드는 중 문제가 생겼어요. 잠시 뒤 다시 질문해 주세요.",
-        chips: ["한밭수목원 휠체어 가능해?", "성심당 갈 수 있어?"],
-        confidence: "low",
-        sources: []
-      };
-      setMessages((current) => [
-        ...current,
-        {
-          id: errorMessageId,
-          role: "assistant",
-          content: errorResponse
-        }
-      ]);
-
-      if (options.continueConversation && conversationModeRef.current) {
-        startSpeech(errorMessageId, errorResponse.message, () => {
-          if (conversationModeRef.current) {
-            scheduleConversationListening(900);
-          }
-        });
-      }
+      if (activeRequestRef.current !== controller || controller.signal.aborted) return;
+      const notice =
+        error instanceof Error ? error.message : "답변을 받지 못했어요. 다시 시도해 주세요.";
+      setRequestNotice(notice);
+      setRetryQuestion(text);
+      setInput(text);
+      conversationModeRef.current = false;
+      setIsConversationMode(false);
+      clearConversationRestartTimer();
+      stopSpeech();
     } finally {
-      isLoadingRef.current = false;
-      setIsLoading(false);
+      if (activeRequestRef.current === controller) {
+        activeRequestRef.current = null;
+        isLoadingRef.current = false;
+        setIsLoading(false);
+      }
     }
   }
 
@@ -611,6 +705,11 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
   }
 
   function closeChat() {
+    activeRequestRef.current?.abort();
+    activeRequestRef.current = null;
+    speechRequestIdRef.current += 1;
+    for (const controller of relatedRequestsRef.current) controller.abort();
+    relatedRequestsRef.current.clear();
     conversationModeRef.current = false;
     setIsConversationMode(false);
     clearConversationRestartTimer();
@@ -642,13 +741,15 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
               <strong className="text-ink block text-base leading-tight font-semibold">다유</strong>
               <span className="text-steel mt-1 flex items-center gap-1.5 text-sm">
                 <span className="bg-brand-500 h-2 w-2 rounded-full" aria-hidden="true" />
-                {isConversationMode
-                  ? isListening
-                    ? "대화 모드로 듣는 중"
-                    : "대화 모드 대기 중"
-                  : isAutoTtsEnabled
-                    ? "자동 읽기 켜짐"
-                    : "질문을 기다리고 있어요"}
+                {isLoading
+                  ? "답변을 준비하고 있어요"
+                  : isConversationMode
+                    ? isListening
+                      ? "대화 모드로 듣는 중"
+                      : "대화 모드 대기 중"
+                    : isAutoTtsEnabled
+                      ? "자동 읽기 켜짐"
+                      : "질문을 기다리고 있어요"}
               </span>
             </div>
           </div>
@@ -722,24 +823,23 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
       </div>
 
       <div
-        className="min-h-0 space-y-4 overflow-y-auto bg-[#f6faf8] px-4 py-5 sm:px-6 lg:px-7"
+        ref={messageListRef}
+        className="min-h-0 space-y-4 overflow-y-auto bg-[#f6faf8] px-4 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-6 lg:px-7"
         aria-live="polite"
       >
-        {messages.map((message, index) => {
-          const isLatest = index === messages.length - 1;
-
+        {messages.map((message) => {
           return message.role === "user" ? (
             <div
               key={message.id}
-              ref={isLatest ? latestMessageRef : null}
+              ref={message.id === scrollTargetMessageId ? scrollAnchorRef : null}
               className="flex justify-end"
             >
-              <div className="from-navy-800 to-brand-800 shadow-brand-900/10 max-w-[78%] rounded-2xl rounded-br-md bg-gradient-to-br px-4 py-3 text-[16px] leading-relaxed font-semibold text-white shadow-md">
+              <div className="from-navy-800 to-brand-800 shadow-brand-900/10 max-w-[78%] rounded-2xl rounded-br-md bg-gradient-to-br px-4 py-3 text-[16px] leading-relaxed font-semibold break-words whitespace-pre-wrap text-white shadow-md">
                 {message.text}
               </div>
             </div>
           ) : (
-            <div key={message.id} ref={isLatest ? latestMessageRef : null}>
+            <div key={message.id}>
               <AssistantMessage
                 messageId={message.id}
                 response={message.content}
@@ -753,6 +853,21 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
             </div>
           );
         })}
+        {requestNotice && (
+          <div className="border-hairline rounded-lg border bg-gray-50 p-3">
+            <p role="status" className="text-ink text-sm leading-relaxed">
+              {requestNotice}
+            </p>
+            <button
+              type="button"
+              onClick={() => void sendMessage(retryQuestion)}
+              disabled={isLoading || !retryQuestion}
+              className="border-hairline text-ink mt-2 min-h-11 rounded-md border bg-white px-4 text-sm font-semibold disabled:opacity-40"
+            >
+              같은 질문 다시 시도
+            </button>
+          </div>
+        )}
         {isLoading ? (
           <div className="flex items-end gap-2.5">
             <DaiyuAvatar />
@@ -761,13 +876,19 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
               <span className="bg-brand-500 h-2 w-2 animate-bounce rounded-full [animation-delay:-0.1s]" />
               <span className="bg-brand-500 h-2 w-2 animate-bounce rounded-full" />
             </div>
+            <button
+              type="button"
+              onClick={cancelRequest}
+              className="border-hairline text-steel min-h-11 rounded-md border bg-white px-3 text-sm font-medium"
+            >
+              답변 요청 취소
+            </button>
           </div>
         ) : null}
-        <div ref={bottomRef} />
       </div>
 
       <form
-        className="border-hairline flex items-center gap-2.5 border-t bg-white/95 px-4 py-3 backdrop-blur sm:px-5"
+        className="border-hairline flex items-center gap-2 border-t bg-white/95 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur sm:gap-2.5 sm:px-5"
         onSubmit={handleSubmit}
       >
         <input
@@ -788,7 +909,7 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
           }
           aria-label="질문 입력"
           disabled={isLoading || isConversationMode}
-          className="focus:border-brand-400 min-w-0 flex-1 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-[16px] transition-colors placeholder:text-gray-600 focus:bg-white disabled:opacity-60"
+          className="focus:border-brand-400 text-ink min-w-0 flex-1 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-[16px] transition-colors placeholder:text-gray-600 focus:bg-white disabled:opacity-60"
         />
         <button
           type="button"
@@ -811,7 +932,7 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
                   : "음성으로 질문 입력"
                 : "이 브라우저는 음성 입력을 지원하지 않아요"
           }
-          className={`inline-flex h-12 min-w-[98px] shrink-0 items-center justify-center gap-1.5 rounded-2xl border px-3 text-[12px] font-extrabold text-white shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
+          className={`inline-flex h-12 w-12 min-w-12 shrink-0 items-center justify-center gap-1.5 rounded-2xl border px-0 text-[12px] font-extrabold text-white shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-40 min-[390px]:w-auto min-[390px]:min-w-[98px] min-[390px]:px-3 ${
             isConversationMode || isListening
               ? "border-red-300 bg-red-500 shadow-red-500/20 hover:bg-red-600"
               : "border-brand-800 bg-brand-800 shadow-brand-900/15 hover:bg-brand-900"
@@ -822,7 +943,9 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
           ) : (
             <Mic className="h-5 w-5" aria-hidden="true" />
           )}
-          <span>{isConversationMode ? "대화 종료" : isListening ? "듣기 중지" : "음성입력"}</span>
+          <span className="hidden min-[390px]:inline">
+            {isConversationMode ? "대화 종료" : isListening ? "듣기 중지" : "음성입력"}
+          </span>
         </button>
         <button
           type="submit"
@@ -849,44 +972,6 @@ function getSpeechRecognitionConstructor() {
   };
 
   return speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition || null;
-}
-
-function getStoredChatMessages(): Message[] {
-  const initialMessages: Message[] = [{ id: 1, role: "assistant", content: INITIAL_RESPONSE }];
-  if (typeof window === "undefined") return initialMessages;
-
-  try {
-    const parsed = JSON.parse(window.sessionStorage.getItem(CHAT_SESSION_STORAGE_KEY) || "null");
-    if (!Array.isArray(parsed)) return initialMessages;
-
-    const storedMessages = parsed.filter(isStoredChatMessage).slice(-MAX_STORED_MESSAGES);
-    return storedMessages.length ? storedMessages : initialMessages;
-  } catch {
-    return initialMessages;
-  }
-}
-
-function isStoredChatMessage(value: unknown): value is Message {
-  if (!value || typeof value !== "object") return false;
-
-  const record = value as Record<string, unknown>;
-  if (typeof record.id !== "number") return false;
-  if (record.role === "user") return typeof record.text === "string";
-  if (record.role !== "assistant" || !record.content || typeof record.content !== "object") {
-    return false;
-  }
-
-  const content = record.content as Record<string, unknown>;
-  return (
-    typeof content.message === "string" &&
-    Array.isArray(content.chips) &&
-    Array.isArray(content.sources) &&
-    ["high", "medium", "low"].includes(String(content.confidence))
-  );
-}
-
-function getLatestMessageId(messages: Message[]) {
-  return messages.reduce((latestId, message) => Math.max(latestId, message.id), 1);
 }
 
 function buildChatHistory(messages: Message[]): ChatHistoryItem[] {
@@ -998,17 +1083,15 @@ function PlaceRecommendationList({ places }: { places: PlaceRecommendation[] }) 
                   </dl>
                 ) : null}
 
-                {place.address || place.latitude ? (
-                  <a
-                    href={buildMapSearchUrl(place)}
-                    target="_blank"
-                    rel="noreferrer"
+                {place.address || place.latitude || place.contentId ? (
+                  <Link
+                    href={buildInternalPlaceMapHref(place)}
                     className="border-brand-200 text-brand-800 hover:border-brand-400 hover:bg-brand-50 mt-3 inline-flex min-h-11 items-center gap-1.5 rounded-xl border bg-white px-3 py-2 text-[12px] font-extrabold transition-colors"
-                    aria-label={`${formatChatDisplayText(place.title)} 지도에서 보기`}
+                    aria-label={`${formatChatDisplayText(place.title)} 다대유 지도에서 보기`}
                   >
                     <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
-                    지도에서 위치 확인
-                  </a>
+                    다대유 지도에서 보기
+                  </Link>
                 ) : null}
               </div>
 
@@ -1103,14 +1186,76 @@ function getPlaceCheckItems(place: PlaceRecommendation) {
   ];
 }
 
-function buildMapSearchUrl(place: PlaceRecommendation) {
-  if (place.latitude && place.longitude) {
-    return `https://map.naver.com/p/search/${encodeURIComponent(
-      `${place.latitude},${place.longitude}`
-    )}`;
-  }
+function CourseRecommendationList({ courses }: { courses: TourismSharedCourse[] }) {
+  return (
+    <section className="mt-5 border-t border-gray-100 pt-5" aria-label="추천 공개 코스">
+      <div className="mb-3">
+        <h3 className="text-[15px] font-extrabold text-gray-950">함께 둘러보기 좋은 코스</h3>
+        <p className="mt-1 text-[12px] leading-relaxed font-semibold text-gray-500">
+          다대유에 공개된 코스 중에서 골랐어요.
+        </p>
+      </div>
 
-  return `https://map.naver.com/p/search/${encodeURIComponent(place.address || place.title)}`;
+      <div className="grid gap-3">
+        {courses.map((course) => {
+          const image = course.places.find((place) => place.firstimage)?.firstimage ?? null;
+          const placeTrail = course.places
+            .slice(0, 3)
+            .map((place) => place.title)
+            .join(" · ");
+
+          return (
+            <Link
+              key={course.course_id}
+              href={`/course/${course.course_id}`}
+              className="group border-hairline hover:border-brand-300 focus-visible:outline-brand-600 grid min-h-28 grid-cols-[7rem_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-white shadow-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
+              aria-label={`${course.course_nm} 코스 자세히 보기`}
+            >
+              <span className="bg-surface relative block min-h-28 overflow-hidden">
+                <HomePlaceImage
+                  src={image}
+                  fallbackSources={course.places.map((place) => place.firstimage)}
+                  alt={course.course_nm}
+                  compactFallback
+                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03] motion-reduce:transform-none"
+                />
+              </span>
+
+              <span className="flex min-w-0 flex-col p-3.5">
+                <strong className="line-clamp-2 text-[14px] leading-snug font-extrabold text-gray-950">
+                  {course.course_nm}
+                </strong>
+                {placeTrail ? (
+                  <span className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed font-semibold text-gray-500">
+                    {placeTrail}
+                  </span>
+                ) : null}
+                <span className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-extrabold text-gray-600">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-amber-800">
+                    <Star className="h-3 w-3" aria-hidden="true" />
+                    {course.average_rating.toFixed(1)}
+                    {course.review_count ? ` · 후기 ${course.review_count}` : ""}
+                  </span>
+                  <span className="bg-brand-50 text-brand-800 inline-flex items-center gap-1 rounded-full px-2 py-1">
+                    <Heart className="h-3 w-3" aria-hidden="true" />
+                    {course.like_count}
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                    <Route className="h-3 w-3" aria-hidden="true" />
+                    {course.place_count || course.places.length}곳
+                  </span>
+                </span>
+                <span className="text-brand-800 mt-auto inline-flex items-center justify-end gap-1 pt-2 text-[12px] font-extrabold">
+                  코스 자세히 보기
+                  <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </span>
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function AssistantMessage({
@@ -1168,6 +1313,8 @@ function AssistantMessage({
         ) : null}
 
         {response.places?.length ? <PlaceRecommendationList places={response.places} /> : null}
+
+        {response.courses?.length ? <CourseRecommendationList courses={response.courses} /> : null}
 
         {response.chips.length > 0 ? (
           <div className="mt-4 border-t border-gray-100 pt-3">

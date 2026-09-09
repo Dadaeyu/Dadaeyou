@@ -10,7 +10,6 @@ import {
   mergeRecentHomePlaceIds,
   parseRecentHomePlaceIds
 } from "@/features/home/homeExperienceState";
-import { useMyLocation } from "@/hooks/useMyLocation";
 import {
   getHomeRecommendationNeedIds,
   normalizeHomeNeedSelection,
@@ -60,7 +59,6 @@ export function useHomeExperience() {
   } | null>(null);
   const initializedDiscoveryOwnerRef = useRef<string | null>(null);
 
-  const location = useMyLocation();
   const ownerId = auth.user?.id ?? null;
   const ownerScope = ownerId ?? "guest";
   const recentPlaceStorageKey = `${HOME_RECENT_PLACE_STORAGE_KEY}:${ownerScope}`;
@@ -75,8 +73,6 @@ export function useHomeExperience() {
       ),
     [needSelection, ownerId, savedNeedIds]
   );
-  const locationLat = location.location ? Number(location.location.lat.toFixed(4)) : null;
-  const locationLng = location.location ? Number(location.location.lng.toFixed(4)) : null;
   const selectedNeedKey = getHomeRecommendationNeedIds(selectedNeedIds).join(",");
 
   useEffect(() => {
@@ -110,8 +106,7 @@ export function useHomeExperience() {
   const requestNeedKey = requestNeedState?.ownerId === ownerId ? requestNeedState.key : null;
   const isRequestNeedCurrent = requestNeedKey !== null && requestNeedKey === selectedNeedKey;
   const currentDiscoveryState = discoveryState?.ownerScope === ownerScope ? discoveryState : null;
-  const criteriaKey =
-    requestNeedKey === null ? null : JSON.stringify([requestNeedKey, locationLat, locationLng]);
+  const criteriaKey = requestNeedKey === null ? null : JSON.stringify([requestNeedKey]);
   const requestUrl = useMemo(() => {
     if (auth.loading || requestNeedKey === null || !currentDiscoveryState) return null;
     const params = new URLSearchParams();
@@ -120,12 +115,8 @@ export function useHomeExperience() {
     if (currentDiscoveryState.excludedPlaceIds.length) {
       params.set("exclude", currentDiscoveryState.excludedPlaceIds.join(","));
     }
-    if (locationLat !== null && locationLng !== null) {
-      params.set("lat", String(locationLat));
-      params.set("lng", String(locationLng));
-    }
     return `/api/home?${params.toString()}`;
-  }, [auth.loading, currentDiscoveryState, requestNeedKey, locationLat, locationLng]);
+  }, [auth.loading, currentDiscoveryState, requestNeedKey]);
   const requestKey = buildHomeRequestKey(ownerId, requestUrl, retryKey);
 
   useEffect(() => {
@@ -266,7 +257,6 @@ export function useHomeExperience() {
       retry: () => {
         setRetryKey((value) => value + 1);
       },
-      location,
       selectedPlace,
       openPlace,
       closePlace
@@ -281,7 +271,6 @@ export function useHomeExperience() {
       loadState,
       loadError,
       isRefreshing,
-      location,
       selectedPlace,
       openPlace,
       closePlace

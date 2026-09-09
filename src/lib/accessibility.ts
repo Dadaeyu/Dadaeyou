@@ -88,45 +88,319 @@ export function mergeAccessibilityPreferences(
   };
 }
 
-// 브라우저 음성엔진마다 숫자 "0"을 "영"/"공" 중 무엇으로 읽을지가 갈려서(같은 화면 안에서도
-// 문맥에 따라 다르게 읽히는 경우가 있음) 항상 "영"으로 통일해 읽도록 텍스트 단계에서 치환한다.
-// - 여러 자리 숫자 중간의 0(예: "10", "2026")은 숫자가 앞뒤에 붙어 있으니 건드리지 않는다.
-// - 소수점의 0(예: "0.0")도 건드리지 않는다 — 엔진이 "X.Y"를 이미 "엑스쩜와이"로 자연스럽게
-//   읽는데, "0"을 "영"으로 글자 치환해버리면 더 이상 숫자로 안 보여서 오히려 이상하게 읽힌다.
-// - 그 외 독립된 "0"(예: "즐겨찾기 0개")만 "영"으로 바꾼다.
-export function normalizeForSpeech(text: string): string {
-  return text.replace(/(?<![.\d])0(?![.\d])/g, "영");
+const ROW_SPEAK_LIMIT = 400;
+const SECTION_SPEAK_LIMIT = 800;
+
+const CHROME_SELECTOR = "header, nav, footer, [data-a11y-chrome], [aria-hidden='true']";
+
+const CONTENT_BLOCK_SELECTOR = [
+  "[data-speakable]",
+  "article",
+  "section",
+  "li",
+  "[role='listitem']",
+  "[role='dialog']",
+  "dl > div",
+  "dialog"
+].join(", ");
+
+/** 호버 시 우선해서 읽는 인터랙티브 요소. 여기에 안 걸리는 일반 본문은 findSpeakableBlock으로
+ * 가장 가까운 내용 블록을 찾아 읽는다(클릭과 같은 기준) — 카드가 통째로 링크인 목록 화면만
+ * 호버로 읽히고 상세 화면 본문은 안 읽히던 문제를 없애기 위해서다. */
+export const HOVER_SPEAK_SELECTOR =
+  "button, a, [role='button'], [role='link'], input, textarea, select";
+
+function normalizeSpeakText(value: string | null | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * 호버 발화 중 마우스가 relatedTarget으로 이동했을 때 중지할지.
+ * 창 밖·비 Element·chrome·읽을 곳 없으면 true.
+ */
+export function shouldStopHoverSpeech(relatedTarget: EventTarget | null): boolean {
+  if (relatedTarget == null || typeof relatedTarget !== "object") return true;
+  if (!("closest" in relatedTarget) || typeof (relatedTarget as Element).closest !== "function") {
+    return true;
+  }
+
+  const el = resolveSpeechTarget(relatedTarget as Element);
+  if (isA11yChrome(el)) return true;
+  if (el.closest(HOVER_SPEAK_SELECTOR)) return false;
+  if (findSpeakableBlock(el)) return false;
+  return true;
+}
+
+function speakLimitFor(element: Element): number {
+  const tag = element.tagName.toLowerCase();
+  if (
+    tag === "section" ||
+    tag === "article" ||
+    tag === "dialog" ||
+    element.getAttribute("role") === "dialog"
+  ) {
+    return SECTION_SPEAK_LIMIT;
+  }
+  return ROW_SPEAK_LIMIT;
+}
+
+export function isA11yChrome(element: Element): boolean {
+  return Boolean(element.closest(CHROME_SELECTOR));
+}
+
+/**
+ * 마우스/클릭 이벤트의 실제 target이 aria-hidden 요소 자체(또는 그 안)일 수 있다 — 예:
+ * "별점 4.5점" 배지처럼 아이콘·숫자는 읽기 중복을 막으려고 aria-hidden 처리했는데, 이용자는
+ * 보통 그 아이콘이나 숫자 위에 마우스를 올리거나 클릭한다. 그 target을 그대로 isA11yChrome에
+ * 넘기면 "무시해야 할 chrome 요소"로 오판해 부모의 호버/클릭 읽기 자체가 죽어버린다. aria-hidden
+ * 조상을 벗어난 첫 요소까지 거슬러 올라가 그걸 기준으로 판단하도록 보정한다.
+ */
+export function resolveSpeechTarget(target: Element): Element {
+  let current = target;
+  while (current.getAttribute("aria-hidden") === "true" && current.parentElement) {
+    current = current.parentElement;
+  }
+  return current;
+}
+
+/** 눌러서 읽을 가장 가까운 내용 블록. main/body처럼 너무 큰 컨테이너는 고르지 않는다. */
+export function findSpeakableBlock(rawStart: Element): Element | null {
+  const start = resolveSpeechTarget(rawStart);
+  if (isA11yChrome(start)) return null;
+
+  const explicit = start.closest("[data-speakable]");
+  if (explicit && !isA11yChrome(explicit)) return explicit;
+
+  // dt/dd 묶음: 같은 행(div) 또는 dl 바로 아래 형제 쌍
+  const dtOrDd = start.closest("dt, dd");
+  if (dtOrDd?.parentElement) {
+    const parent = dtOrDd.parentElement;
+    if (
+      parent.tagName.toLowerCase() === "div" &&
+      parent.parentElement?.tagName.toLowerCase() === "dl"
+    ) {
+      return parent;
+    }
+    return dtOrDd;
+  }
+
+  let current: Element | null = start;
+  while (current) {
+    if (isA11yChrome(current)) return null;
+    const tag = current.tagName.toLowerCase();
+    if (tag === "main" || tag === "body" || tag === "html") return null;
+
+    if (current.matches(CONTENT_BLOCK_SELECTOR)) {
+      return current;
+    }
+
+    const role = current.getAttribute("role");
+    if (
+      role === "button" ||
+      role === "link" ||
+      tag === "button" ||
+      tag === "a" ||
+      tag === "h1" ||
+      tag === "h2" ||
+      tag === "h3" ||
+      tag === "p"
+    ) {
+      return current;
+    }
+
+    current = current.parentElement;
+  }
+
+  return null;
+}
+
+/** 방금 읽은 블록의 다음 형제(문서 순서)를 찾는다. */
+export function findNextSpeakableBlock(from: Element): Element | null {
+  const root =
+    from.closest("dialog, [role='dialog'], main, [data-place-section]") ?? from.parentElement;
+  if (!root) return null;
+
+  const candidates = Array.from(
+    root.querySelectorAll(
+      "[data-speakable], article, section, li, [role='listitem'], dl > div, h1, h2, h3, p, button, a"
+    )
+  ).filter((el) => !isA11yChrome(el) && normalizeSpeakText(el.textContent));
+
+  const index = candidates.indexOf(from);
+  if (index >= 0 && index < candidates.length - 1) {
+    return candidates[index + 1] ?? null;
+  }
+
+  // from이 후보 목록에 없으면, 문서 순서상 from 다음에 오는 첫 후보
+  for (const candidate of candidates) {
+    const position = from.compareDocumentPosition(candidate);
+    if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+// 카드/섹션은 본문 전체를 읽는데, element.textContent를 그대로 쓰면 두 가지 문제가 있다.
+//  1) aria-hidden/aria-label을 전혀 모른다 — 화면에만 보이라고 숨겨둔 값까지 그대로 읽는다.
+//  2) 인접한 요소의 텍스트를 구분자 없이 이어붙인다 — 그래서 제목 "코스 2-1" 바로 뒤에 별점
+//     "4.5"가 오면 "2-14.5"가 되어 "코스2 마이너스 14.5"처럼 하나의 수로 읽혔다.
+// 그래서 직접 트리를 훑으면서, aria-hidden 하위 트리는 건너뛰고 aria-label이 있는 요소는 그
+// 라벨로 대체하며, 조각 사이에 구분자를 넣어 문장을 만든다(표준 접근성 트리와 같은 원리).
+// 제목·라벨처럼 그 자체로 완결된 조각 뒤에는 쉼표를 넣어 TTS가 끊어 읽게 한다.
+type SpeakPart = { text: string; standalone: boolean };
+
+const STANDALONE_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
+
+function collectSpeakParts(element: Element, parts: SpeakPart[]): void {
+  // 붙어 있는 텍스트 노드는 원문 그대로 이어 붙였다가 한 조각으로 만든다 — React가
+  // `{count}곳`을 텍스트 노드 둘로 쪼개도 "1 곳"이 아니라 "1곳"으로 읽히게 하기 위해서다.
+  let textBuffer = "";
+  const flushText = () => {
+    const text = normalizeSpeakText(textBuffer);
+    textBuffer = "";
+    if (text) parts.push({ text, standalone: false });
+  };
+
+  for (const child of Array.from(element.childNodes)) {
+    if (child.nodeType === 3) {
+      textBuffer += child.textContent ?? "";
+      continue;
+    }
+    if (child.nodeType !== 1) continue;
+
+    flushText();
+    const childElement = child as Element;
+    if (childElement.getAttribute("aria-hidden") === "true") continue;
+
+    const label = childElement.getAttribute("aria-label")?.trim();
+    if (label) {
+      parts.push({ text: label, standalone: true });
+      continue;
+    }
+
+    const before = parts.length;
+    collectSpeakParts(childElement, parts);
+
+    // 제목 태그는 뒤에 오는 내용과 붙지 않도록 하나의 완결된 조각으로 표시한다.
+    if (STANDALONE_TAGS.has(childElement.tagName.toLowerCase()) && parts.length > before) {
+      parts[parts.length - 1] = { text: parts[parts.length - 1].text, standalone: true };
+    }
+  }
+  flushText();
+}
+
+function extractSpeakableBody(element: Element): string {
+  // 테스트 목 객체처럼 childNodes가 없는 환경에서는 textContent로 폴백한다.
+  if (!element.childNodes) return element.textContent ?? "";
+
+  const parts: SpeakPart[] = [];
+  collectSpeakParts(element, parts);
+  if (!parts.length) return element.textContent ?? "";
+
+  return parts.reduce((sentence, part, index) => {
+    if (index === 0) return part.text;
+    const separator = part.standalone || parts[index - 1].standalone ? ", " : " ";
+    return sentence + separator + part.text;
+  }, "");
+}
+
+function labelledByText(element: Element): string {
+  const labelledBy = element.getAttribute("aria-labelledby");
+  if (!labelledBy) return "";
+  return labelledBy
+    .split(/\s+/)
+    .map((id) => normalizeSpeakText(document.getElementById(id)?.textContent))
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function getSpeakableText(element: Element): string | null {
-  const labelledBy = element.getAttribute("aria-labelledby");
-  if (labelledBy) {
-    const labelEl = document.getElementById(labelledBy);
-    if (labelEl?.textContent?.trim()) return labelEl.textContent.trim();
-  }
+  const dataSpeak = element.getAttribute("data-speak-text")?.trim();
+  if (dataSpeak) return dataSpeak.slice(0, speakLimitFor(element));
 
   const ariaLabel = element.getAttribute("aria-label")?.trim();
-  if (ariaLabel) return ariaLabel;
-
   const role = element.getAttribute("role");
   const tag = element.tagName.toLowerCase();
-  const interactive =
+  const isTextarea = tag === "textarea";
+  const inputType =
+    tag === "input"
+      ? ((element as HTMLInputElement).type || element.getAttribute("type") || "text").toLowerCase()
+      : "";
+  const isTextInput =
+    tag === "input" &&
+    ["text", "search", "email", "tel", "url", "number", "date", "time", "month", "week"].includes(
+      inputType
+    );
+
+  if (isTextarea || isTextInput || inputType === "password") {
+    const input = element as HTMLInputElement | HTMLTextAreaElement;
+    const readableValue = inputType === "password" ? "" : input.value;
+    const inputText = (readableValue || input.placeholder || "").replace(/\s+/g, " ").trim();
+    const parts = [ariaLabel, inputText].filter((part): part is string => Boolean(part));
+    return parts.length ? parts.join(", ").slice(0, 200) : null;
+  }
+
+  if (tag === "input" && ariaLabel) return ariaLabel;
+
+  // <select>는 옵션 전체(예: 0시~23시 24개)가 자식 텍스트라, 그대로 body를 뽑으면 목록 전체를
+  // 처음부터 다 읽어버린다. 실제로 의미 있는 건 "지금 선택된 값" 하나뿐이다.
+  if (tag === "select") {
+    const select = element as HTMLSelectElement;
+    const selected = select.selectedOptions?.[0] ?? select.options?.[select.selectedIndex];
+    const selectedText = normalizeSpeakText(selected?.textContent);
+    const parts = [ariaLabel, selectedText].filter((part): part is string => Boolean(part));
+    return parts.length ? parts.join(", ").slice(0, 200) : null;
+  }
+
+  // 짧은 컨트롤은 aria-label만. 섹션/카드는 본문까지.
+  const isCompactControl =
     role === "button" ||
     role === "link" ||
     tag === "button" ||
     tag === "a" ||
     tag === "input" ||
     tag === "textarea" ||
-    tag === "select" ||
-    // span/div처럼 원래 안 읽던 태그를 개별적으로 읽기 대상에 넣는 opt-in 표시.
-    element.hasAttribute("data-speakable");
+    tag === "select";
 
-  if (!interactive && tag !== "h1" && tag !== "h2" && tag !== "h3" && tag !== "p") {
+  if (ariaLabel && isCompactControl) return ariaLabel;
+
+  const label = labelledByText(element);
+  const body = normalizeSpeakText(extractSpeakableBody(element));
+  if (label) {
+    const withoutRepeatedLabel = body.startsWith(label) ? body.slice(label.length).trim() : body;
+    const combined = withoutRepeatedLabel ? `${label}. ${withoutRepeatedLabel}` : label;
+    return combined.slice(0, speakLimitFor(element)) || null;
+  }
+
+  if (ariaLabel) return ariaLabel.slice(0, speakLimitFor(element));
+
+  const interactive = isCompactControl;
+  const isContentBlock =
+    element.hasAttribute("data-speakable") ||
+    tag === "section" ||
+    tag === "article" ||
+    tag === "li" ||
+    tag === "dialog" ||
+    tag === "div" ||
+    tag === "dl" ||
+    tag === "dt" ||
+    tag === "dd" ||
+    role === "dialog" ||
+    role === "listitem";
+
+  if (
+    !interactive &&
+    !isContentBlock &&
+    tag !== "h1" &&
+    tag !== "h2" &&
+    tag !== "h3" &&
+    tag !== "p"
+  ) {
     return null;
   }
 
-  const text = element.textContent?.replace(/\s+/g, " ").trim();
-  if (!text) return null;
-
-  return text.slice(0, 200);
+  if (!body) return null;
+  return body.slice(0, speakLimitFor(element));
 }

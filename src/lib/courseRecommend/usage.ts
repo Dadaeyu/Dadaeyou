@@ -79,3 +79,26 @@ export async function reserveCourseRecommendUsage(
     limit: COURSE_RECOMMEND_DAILY_LIMIT
   };
 }
+
+/**
+ * reserveCourseRecommendUsage 와 달리 카운트를 올리지 않고 오늘 이미 쓴 횟수만 조회한다.
+ * "AI 코스 추천받기" 배너를 처음 렌더링할 때부터(실제로 누르기 전에) 오늘 사용 현황을
+ * 보여주기 위한 용도 — 아직 오늘 쓴 적이 없으면 행 자체가 없으므로 0회로 취급한다.
+ */
+export async function peekCourseRecommendUsage(clientKey: string): Promise<CourseRecommendUsage> {
+  const clientPeriod = getClientPeriod();
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("course_recommend_daily_usage")
+    .select("request_count")
+    .eq("client_key", clientKey)
+    .eq("client_period", clientPeriod)
+    .maybeSingle();
+
+  const used = error ? 0 : Number(data?.request_count ?? 0);
+  return {
+    used,
+    remaining: Math.max(COURSE_RECOMMEND_DAILY_LIMIT - used, 0),
+    limit: COURSE_RECOMMEND_DAILY_LIMIT
+  };
+}

@@ -17,15 +17,26 @@ import {
   FONT_SCALE_MAX,
   FONT_SCALE_MIN,
   FONT_SCALE_STEP,
+  findNextSpeakableBlock,
+  findSpeakableBlock,
   getSpeakableText,
-  normalizeForSpeech,
+  HOVER_SPEAK_SELECTOR,
+  isA11yChrome,
   loadAccessibilityState,
   mergeAccessibilityPreferences,
+  resolveSpeechTarget,
   saveAccessibilityState,
+  shouldStopHoverSpeech,
   type AccessibilityState
 } from "@/lib/accessibility";
 import { useOptionalAuth } from "@/context/AuthContext";
 import { updateUserPreferences } from "@/lib/supabase/member";
+import {
+  clearAccessibilityAccountSavePending,
+  markAccessibilityAccountSavePending,
+  readPendingAccessibilityAccountSave,
+  type AccessibilityAccountSaveStatus
+} from "@/lib/accessibility-account-save";
 
 interface AccessibilityContextValue extends AccessibilityState {
   toggleDarkMode: () => void;
@@ -35,9 +46,11 @@ interface AccessibilityContextValue extends AccessibilityState {
   increaseFontScale: () => void;
   decreaseFontScale: () => void;
   setFontScale: (value: number) => void;
-  /** 읽어주기가 켜져 있을 때만(꺼져 있으면 아무 것도 안 함) 즉시 텍스트를 읽는다.
-   *  호버/포커스로는 못 잡는 값 변경(예: 필터 선택 결과)을 알릴 때 쓴다. */
-  speak: (text: string) => void;
+  /** 방금 읽은 블록의 다음 내용을 이어서 읽는다 */
+  speakNext: () => void;
+  canSpeakNext: boolean;
+  accountSaveStatus: AccessibilityAccountSaveStatus;
+  retryAccountSave: () => void;
 }
 
 const AccessibilityContext = createContext<AccessibilityContextValue | null>(null);
@@ -45,15 +58,33 @@ const AccessibilityContext = createContext<AccessibilityContextValue | null>(nul
 export function AccessibilityProvider({ children }: { children: ReactNode }) {
   const auth = useOptionalAuth();
   const [state, setState] = useState<AccessibilityState>(DEFAULT_A11Y_STATE);
+  const [canSpeakNext, setCanSpeakNext] = useState(false);
   const stateRef = useRef(state);
-  const lastSpoken = useRef<string | null>(null);
+  const activeUtterance = useRef<SpeechSynthesisUtterance | null>(null);
+  const lastBlockRef = useRef<Element | null>(null);
+  /** 호버로 시작한 읽기만 마우스 이탈 시 중지한다 */
+  const speakSourceRef = useRef<"hover" | "other">("other");
   const loaded = useRef(false);
   const syncedFromDb = useRef(false);
   const syncedUserId = useRef<string | null>(null);
+  const persistRequestIdRef = useRef(0);
+  const savedHintTimerRef = useRef<number>(0);
+  const pendingRetryUserIdRef = useRef<string | null>(null);
+  const [accountSaveStatus, setAccountSaveStatus] =
+    useState<AccessibilityAccountSaveStatus>("idle");
+  const accountSaveStatusRef = useRef(accountSaveStatus);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    accountSaveStatusRef.current = accountSaveStatus;
+  }, [accountSaveStatus]);
+
+  useEffect(() => {
+    return () => window.clearTimeout(savedHintTimerRef.current);
+  }, []);
 
   useEffect(() => {
     const saved = loadAccessibilityState();
@@ -70,6 +101,20 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
     if (!auth.user) {
       syncedFromDb.current = false;
       syncedUserId.current = null;
+      pendingRetryUserIdRef.current = null;
+      setAccountSaveStatus("idle");
+      return;
+    }
+
+    const pendingState = readPendingAccessibilityAccountSave(auth.user.id);
+    if (pendingState) {
+      syncedFromDb.current = true;
+      syncedUserId.current = auth.user.id;
+      stateRef.current = pendingState;
+      setState(pendingState);
+      applyAccessibilityState(pendingState);
+      saveAccessibilityState(pendingState);
+      setAccountSaveStatus("error");
       return;
     }
 
@@ -91,7 +136,14 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
     async (next: AccessibilityState) => {
       applyAccessibilityState(next);
       saveAccessibilityState(next);
-      if (!auth?.user) return;
+      if (!auth?.user) {
+        setAccountSaveStatus("idle");
+        return;
+      }
+
+      const requestId = ++persistRequestIdRef.current;
+      markAccessibilityAccountSavePending(auth.user.id, next);
+      setAccountSaveStatus("saving");
       try {
         const updated = await updateUserPreferences(auth.user.id, {
           dark_mode: next.darkMode,
@@ -99,6 +151,8 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
           font_scale: next.fontScale,
           read_aloud: next.readAloud
         });
+        if (requestId !== persistRequestIdRef.current) return;
+        clearAccessibilityAccountSavePending();
         auth.patchPreferences({
           dark_mode: updated.dark_mode,
           high_contrast: updated.high_contrast,
@@ -106,86 +160,180 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
           read_aloud: updated.read_aloud,
           updated_at: updated.updated_at
         });
-      } catch (err) {
-        console.warn("[a11y] DB 동기화 실패 (로컬에는 저장됨)", err);
+        setAccountSaveStatus("saved");
+        window.clearTimeout(savedHintTimerRef.current);
+        savedHintTimerRef.current = window.setTimeout(() => {
+          setAccountSaveStatus((status) => (status === "saved" ? "idle" : status));
+        }, 2500);
+      } catch {
+        if (requestId !== persistRequestIdRef.current) return;
+        markAccessibilityAccountSavePending(auth.user.id, next);
+        setAccountSaveStatus("error");
       }
     },
     [auth]
   );
 
-  const speak = useCallback((rawText: string) => {
+  const retryAccountSave = useCallback(() => {
+    if (!auth?.user) return;
+    void persistState(stateRef.current);
+  }, [auth?.user, persistState]);
+
+  useEffect(() => {
+    if (!auth?.user || auth.loading) return;
+    if (!readPendingAccessibilityAccountSave(auth.user.id)) {
+      pendingRetryUserIdRef.current = null;
+      return;
+    }
+    if (pendingRetryUserIdRef.current === auth.user.id) return;
+    pendingRetryUserIdRef.current = auth.user.id;
+    void persistState(stateRef.current);
+  }, [auth?.loading, auth?.user, persistState]);
+
+  useEffect(() => {
+    const onOnline = () => {
+      if (accountSaveStatusRef.current !== "error") return;
+      retryAccountSave();
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [retryAccountSave]);
+
+  const speak = useCallback((text: string, force = false) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
-    if (!stateRef.current.readAloud) return;
+    if (!force && activeUtterance.current?.text === text) return;
 
-    const text = normalizeForSpeech(rawText);
-    if (lastSpoken.current === text) return;
-
-    lastSpoken.current = text;
+    activeUtterance.current = null;
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
+    activeUtterance.current = utterance;
+    const release = () => {
+      if (activeUtterance.current === utterance) activeUtterance.current = null;
+    };
+    utterance.onend = release;
+    utterance.onerror = release;
     utterance.lang = "ko-KR";
     utterance.rate = 1;
-    window.speechSynthesis.speak(utterance);
+    try {
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      release();
+    }
   }, []);
+
+  const speakBlock = useCallback(
+    (block: Element, force = false) => {
+      const text = getSpeakableText(block);
+      if (!text) return false;
+      lastBlockRef.current = block;
+      setCanSpeakNext(Boolean(findNextSpeakableBlock(block)));
+      speak(text, force);
+      return true;
+    },
+    [speak]
+  );
+
+  const speakNext = useCallback(() => {
+    const current = lastBlockRef.current;
+    if (!current || !document.contains(current)) {
+      setCanSpeakNext(false);
+      return;
+    }
+    const next = findNextSpeakableBlock(current);
+    if (!next) {
+      setCanSpeakNext(false);
+      speakSourceRef.current = "other";
+      speak("다음 읽을 내용이 없습니다.", true);
+      return;
+    }
+    speakSourceRef.current = "other";
+    speakBlock(next, true);
+  }, [speak, speakBlock]);
 
   useEffect(() => {
     if (!state.readAloud) {
-      lastSpoken.current = null;
+      activeUtterance.current = null;
+      lastBlockRef.current = null;
+      speakSourceRef.current = "other";
+      setCanSpeakNext(false);
       window.speechSynthesis?.cancel();
       return;
     }
 
-    // 카드/구역 하나를 통째로 하나의 문장으로 읽어야 하는 영역(검색 결과, 게시글 제목/본문
-    // 영역 등)에는 data-speak-group을 붙여둔다. 그 영역 안에서 원래 텍스트 자체로도 읽히는
-    // 하위 요소(h1/h3/p — 그룹 라벨에 이미 포함된 중복 텍스트)는 aria-hidden="true"로 표시해
-    // 걸러내고, 파일 링크·이미지 버튼처럼 그룹과 무관하게 자기 고유의 의미가 있는 진짜 상호작용
-    // 요소는 건너뛰지 않고 그대로 읽는다.
-    const SPEAK_SELECTOR =
-      "button, a, [role='button'], [role='link'], input, textarea, select, p, h1, h2, h3, [data-speakable], [data-speak-group]";
-
-    const resolveSpeakTarget = (start: Element): Element | null => {
-      let node: Element | null = start;
-      while (node) {
-        const match: Element | null = node.closest(SPEAK_SELECTOR);
-        if (!match) return null;
-        if (match.getAttribute("aria-hidden") !== "true") return match;
-        node = match.parentElement;
-      }
-      return null;
+    const cancelHoverSpeech = () => {
+      if (speakSourceRef.current !== "hover") return;
+      window.speechSynthesis?.cancel();
+      activeUtterance.current = null;
+      speakSourceRef.current = "other";
     };
 
     const handleFocusIn = (event: FocusEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
+      const raw = event.target;
+      if (!(raw instanceof Element)) return;
+      // aria-hidden 아이콘/숫자(예: 별점 배지 안) 위가 실제 이벤트 target일 수 있다 — 그걸
+      // 그대로 chrome 판정에 넘기면 정작 부모 배지의 읽기 자체가 죽는다. 숨김 조상을
+      // 벗어난 지점부터 판단한다.
+      const target = resolveSpeechTarget(raw);
+      if (isA11yChrome(target)) return;
 
-      const speakTarget = resolveSpeakTarget(target);
-      if (!speakTarget) return;
-
-      const text = getSpeakableText(speakTarget);
-      if (text) speak(text);
+      const block = findSpeakableBlock(target) ?? target;
+      if (speakBlock(block)) speakSourceRef.current = "other";
     };
 
     const handleMouseOver = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
+      const raw = event.target;
+      if (!(raw instanceof Element)) return;
+      const target = resolveSpeechTarget(raw);
+      if (isA11yChrome(target)) return;
 
-      const speakTarget = resolveSpeakTarget(target);
-      if (!speakTarget) return;
+      // 버튼·링크가 있으면 그걸 우선하고(목록은 카드 전체가 링크), 없으면 클릭과 같은 기준으로
+      // 가장 가까운 내용 블록을 읽는다 — 상세 화면처럼 본문이 일반 텍스트인 곳도 호버로 읽히게.
+      const block = target.closest(HOVER_SPEAK_SELECTOR) ?? findSpeakableBlock(target);
+      if (!block) return;
 
-      const text = getSpeakableText(speakTarget);
-      if (text) speak(text);
+      if (speakBlock(block)) speakSourceRef.current = "hover";
+    };
+
+    const handleClick = (event: MouseEvent) => {
+      const raw = event.target;
+      if (!(raw instanceof Element)) return;
+      const target = resolveSpeechTarget(raw);
+      if (isA11yChrome(target)) return;
+
+      // 접근성 패널의 「다음 내용 읽기」는 클릭 읽기 대상에서 제외
+      if (target.closest("[data-a11y-speak-next]")) return;
+
+      const block = findSpeakableBlock(target);
+      if (!block) return;
+      if (speakBlock(block)) speakSourceRef.current = "other";
+    };
+
+    const handleMouseOut = (event: MouseEvent) => {
+      if (!shouldStopHoverSpeech(event.relatedTarget)) return;
+      cancelHoverSpeech();
+    };
+
+    const handleDocumentLeave = () => {
+      cancelHoverSpeech();
     };
 
     document.addEventListener("focusin", handleFocusIn);
     document.addEventListener("mouseover", handleMouseOver);
+    document.addEventListener("mouseout", handleMouseOut);
+    document.addEventListener("click", handleClick, true);
+    document.documentElement.addEventListener("mouseleave", handleDocumentLeave);
 
     return () => {
       document.removeEventListener("focusin", handleFocusIn);
       document.removeEventListener("mouseover", handleMouseOver);
+      activeUtterance.current = null;
+      document.removeEventListener("mouseout", handleMouseOut);
+      document.removeEventListener("click", handleClick, true);
+      document.documentElement.removeEventListener("mouseleave", handleDocumentLeave);
       window.speechSynthesis?.cancel();
     };
-  }, [state.readAloud, speak]);
+  }, [state.readAloud, speakBlock]);
 
   const updateState = useCallback(
     (updater: (prev: AccessibilityState) => AccessibilityState) => {
@@ -248,7 +396,10 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
       increaseFontScale,
       decreaseFontScale,
       setFontScale,
-      speak
+      speakNext,
+      canSpeakNext,
+      accountSaveStatus,
+      retryAccountSave
     }),
     [
       state,
@@ -259,7 +410,10 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
       increaseFontScale,
       decreaseFontScale,
       setFontScale,
-      speak
+      speakNext,
+      canSpeakNext,
+      accountSaveStatus,
+      retryAccountSave
     ]
   );
 

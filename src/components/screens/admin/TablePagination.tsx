@@ -1,8 +1,26 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 
-const PAGE_WINDOW = 10;
+const PAGE_WINDOW_DESKTOP = 10;
+const PAGE_WINDOW_MOBILE = 5;
+
+// 모바일 폭(Tailwind sm 미만)에서는 페이지 버튼 10개 + 이동 버튼 4개가 한 줄에 안 들어가
+// 잘리거나 어색하게 줄바꿈됐다. 화면 폭에 맞춰 한 번에 보여줄 페이지 번호 개수를 줄인다.
+function usePageWindow(): number {
+  const [pageWindow, setPageWindow] = useState(PAGE_WINDOW_DESKTOP);
+
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 639px)");
+    const update = () => setPageWindow(mql.matches ? PAGE_WINDOW_MOBILE : PAGE_WINDOW_DESKTOP);
+    update();
+    mql.addEventListener("change", update);
+    return () => mql.removeEventListener("change", update);
+  }, []);
+
+  return pageWindow;
+}
 
 type TablePaginationProps = {
   page: number;
@@ -21,8 +39,9 @@ export function TablePagination({
   disabled = false,
   onChange
 }: TablePaginationProps) {
-  const windowStart = Math.floor(page / PAGE_WINDOW) * PAGE_WINDOW;
-  const windowEnd = Math.min(windowStart + PAGE_WINDOW, totalPagesCount);
+  const pageWindow = usePageWindow();
+  const windowStart = Math.floor(page / pageWindow) * pageWindow;
+  const windowEnd = Math.min(windowStart + pageWindow, totalPagesCount);
   const pages: number[] = [];
   for (let i = windowStart; i < windowEnd; i += 1) pages.push(i);
 
@@ -30,7 +49,7 @@ export function TablePagination({
   const to = Math.min((page + 1) * pageSize, total);
 
   const navBtn =
-    "border-hairline text-steel hover:bg-surface-soft flex h-7 w-7 items-center justify-center rounded-full border transition-colors disabled:opacity-40 disabled:hover:bg-transparent";
+    "border-hairline text-steel hover:bg-surface-soft flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-40 disabled:hover:bg-transparent";
 
   return (
     <div className="border-hairline-soft flex items-center justify-between gap-3 border-t px-4 py-3">
@@ -49,7 +68,7 @@ export function TablePagination({
         </button>
         <button
           type="button"
-          onClick={() => onChange(Math.max(0, windowStart - PAGE_WINDOW))}
+          onClick={() => onChange(Math.max(0, windowStart - pageWindow))}
           disabled={disabled || windowStart <= 0}
           aria-label="이전 페이지들"
           className={navBtn}
@@ -63,7 +82,7 @@ export function TablePagination({
             onClick={() => onChange(p)}
             disabled={disabled}
             aria-current={p === page ? "page" : undefined}
-            className={`flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-xs font-semibold transition-colors disabled:opacity-40 ${
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full px-2 text-xs font-semibold transition-colors disabled:opacity-40 ${
               p === page
                 ? "bg-navy-600 text-fixed-white"
                 : "border-hairline text-steel hover:bg-surface-soft bg-background border"
@@ -74,7 +93,7 @@ export function TablePagination({
         ))}
         <button
           type="button"
-          onClick={() => onChange(windowStart + PAGE_WINDOW)}
+          onClick={() => onChange(windowStart + pageWindow)}
           disabled={disabled || windowEnd >= totalPagesCount}
           aria-label="다음 페이지들"
           className={navBtn}

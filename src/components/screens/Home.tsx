@@ -9,6 +9,8 @@ import { HomeDiscovery } from "@/features/home/HomeDiscovery";
 import { HomeOfficialGuide } from "@/features/home/HomeOfficialGuide";
 import { HomePlaceDialog } from "@/features/home/HomePlaceDialog";
 import { HomeRecommendations } from "@/features/home/HomeRecommendations";
+import { HomeTravelSupport } from "@/features/home/HomeTravelSupport";
+import { HomeWeatherNotice } from "@/features/home/HomeWeatherNotice";
 import { homeNeedIdsToChatNeeds } from "@/features/home/homeData";
 import { useHomeExperience } from "@/features/home/useHomeExperience";
 
@@ -71,6 +73,9 @@ export default function Home() {
           <HomeNeedsPicker experience={experience} easyMode={easyMode} />
           <HomeRecommendations experience={experience} easyMode={easyMode} />
         </section>
+
+        <HomeTravelSupport />
+        <HomeWeatherNotice />
       </div>
 
       <div className="mt-10 sm:mt-14 lg:mt-16">

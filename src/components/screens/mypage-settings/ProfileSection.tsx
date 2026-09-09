@@ -181,7 +181,7 @@ export function ProfileSection({ onDirtyChange }: Props) {
               className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition-colors ${
                 gender === g
                   ? "bg-brand-50 text-brand-700 ring-brand-300 ring-1"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  : "border-hairline border bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
               {g}
@@ -201,7 +201,7 @@ export function ProfileSection({ onDirtyChange }: Props) {
               className={`rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
                 age === a
                   ? "bg-brand-50 text-brand-700 ring-brand-300 ring-1"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  : "border-hairline border bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
               {a}

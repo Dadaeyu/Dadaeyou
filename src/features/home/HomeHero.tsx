@@ -61,7 +61,7 @@ export function HomeHero({
   experience: HomeExperience;
   onOpenChat: () => void;
 }) {
-  const displayName = experience.auth.member?.nickname?.trim();
+  const displayName = experience.auth.user ? experience.auth.member?.nickname?.trim() : "";
   const hasRecommendationNeeds = getHomeRecommendationNeedIds(experience.selectedNeedIds).length;
   const introCopy = hasRecommendationNeeds
     ? "선택한 조건으로 장소별 이동·편의 정보를 비교해 보세요."

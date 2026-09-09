@@ -1,5 +1,30 @@
+export function buildHomePlaceMapHref(place: { id: string; title: string }) {
+  const params = new URLSearchParams();
+  const contentId = place.id.trim();
+  const query = place.title.trim();
+
+  if (contentId) params.set("contentId", contentId);
+  if (query) params.set("query", query);
+
+  return `/map?${params.toString()}`;
+}
+
 export function shouldShowHomePlaceImage(source: string | null, failedSource: string | null) {
   return Boolean(source && source !== failedSource);
+}
+
+export function buildHomeFallbackCopy({ compact = false }: { compact?: boolean } = {}) {
+  if (compact) {
+    return {
+      title: "사진 준비 중",
+      description: null
+    };
+  }
+
+  return {
+    title: "등록된 장소 사진이 없어요",
+    description: "주소와 방문 정보는 아래에서 확인할 수 있어요"
+  };
 }
 
 export function splitHomeRecommendationPlaces<T>(places: readonly T[], limit = 4) {

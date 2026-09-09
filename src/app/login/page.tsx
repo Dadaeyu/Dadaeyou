@@ -23,6 +23,7 @@ function LoginForm() {
   const next = getSafeNextPath(searchParams.get("next"), "/");
   const authError = searchParams.get("error");
   const authNotice = searchParams.get("notice");
+  const withdrawnDone = searchParams.get("withdrawn") === "1";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -42,7 +43,7 @@ function LoginForm() {
               : authError === "email_not_confirmed"
                 ? "이메일 인증이 완료되지 않았습니다. 메일함의 인증 링크를 확인해 주세요."
                 : authError === "auth_callback_failed"
-                  ? "인증 링크가 만료되었거나 이미 사용되었습니다. 로그인을 시도하거나 인증 메일을 다시 받아 주세요."
+                  ? "소셜 로그인에 실패했습니다. 카카오·구글·네이버 버튼을 다시 눌러 주세요."
                   : null
   );
   const [notice, setNotice] = useState<string | null>(
@@ -50,9 +51,13 @@ function LoginForm() {
       ? "비밀번호가 변경되었습니다. 새 비밀번호로 로그인해 주세요."
       : authNotice === "email_confirmed"
         ? "이메일 인증이 완료되었습니다. 로그인해 주세요."
-        : authNotice === "withdrawn"
+        : authNotice === "withdrawn" || withdrawnDone
           ? "회원 탈퇴가 완료되었습니다. 이용해 주셔서 감사합니다."
-          : null
+          : authError === "social_rejoin"
+            ? "이전 소셜 연동을 해제했습니다. 같은 버튼을 다시 누르면 새 계정으로 가입됩니다."
+            : authError === "social_provider_mismatch"
+              ? "카카오·구글은 네이버 계정과 따로 가입됩니다. 방금 누른 버튼을 다시 누르면 새 계정으로 이어집니다."
+              : null
   );
 
   useEffect(() => {
@@ -192,9 +197,7 @@ function LoginForm() {
             {message}
           </p>
           {(authError === "email_not_confirmed" ||
-            authError === "auth_callback_failed" ||
-            message.includes("이메일 인증이 완료되지 않았습니다") ||
-            message.includes("인증 링크가 만료")) && (
+            message.includes("이메일 인증이 완료되지 않았습니다")) && (
             <p className="text-stone text-center text-xs">
               메일이 오지 않았나요?{" "}
               <Link

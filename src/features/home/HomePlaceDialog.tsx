@@ -38,6 +38,7 @@ import {
   type RankedHomePlace
 } from "@/features/home/homeData";
 import {
+  buildHomePlaceMapHref,
   formatHomeDetailValue,
   formatHomeEventPeriod,
   shouldShowHomeParkingDetail,
@@ -100,6 +101,7 @@ export function HomePlaceDialog({
   const eventPeriod = formatHomeEventPeriod(place.eventStartDate, place.eventEndDate);
   const showParkingDetail = shouldShowHomeParkingDetail(place.parking);
   const phoneHref = place.phone ? `tel:${place.phone.replace(/[^\d+]/g, "")}` : null;
+  const mapHref = buildHomePlaceMapHref(place);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -129,7 +131,7 @@ export function HomePlaceDialog({
 
   const sharePlace = async () => {
     setShareStatus(null);
-    const shareUrl = `${window.location.origin}/map?query=${encodeURIComponent(place.title)}`;
+    const shareUrl = `${window.location.origin}${mapHref}`;
     try {
       if (navigator.share) {
         await navigator.share({
@@ -277,6 +279,7 @@ export function HomePlaceDialog({
 
             <section
               data-place-section="visit"
+              data-speakable
               tabIndex={-1}
               className={`${usesSelectedNeedSummary ? "mt-10 border-t pt-9" : ""} border-hairline scroll-mt-14 outline-none`}
               aria-labelledby="visit-title"
@@ -391,7 +394,7 @@ export function HomePlaceDialog({
               </summary>
               <div className="border-hairline border-t bg-white px-4 pb-5">
                 <dl className="divide-hairline divide-y">
-                  <SourceRow label="정보 출처" value="한국관광공사 관광정보·무장애 여행정보" />
+                  <SourceRow label="정보 출처" value="ⓒ한국관광공사 관광정보·무장애 여행정보" />
                   <SourceRow label="관광정보 갱신" value={sourceDate ?? "확인할 수 없음"} />
                 </dl>
                 <p className="text-steel mt-2 text-sm leading-6">
@@ -413,7 +416,7 @@ export function HomePlaceDialog({
             className={`grid gap-2 ${phoneHref ? "grid-cols-[minmax(0,1fr)_auto_auto]" : "grid-cols-[minmax(0,1fr)_auto]"}`}
           >
             <Link
-              href={`/map?query=${encodeURIComponent(place.title)}`}
+              href={mapHref}
               className="bg-brand-800 hover:bg-brand-900 flex min-h-12 min-w-0 items-center justify-center gap-2 rounded-xl px-3 text-center leading-tight font-semibold whitespace-nowrap text-white transition-colors sm:px-4"
             >
               <span className="sm:hidden">지도 보기</span>
@@ -488,7 +491,7 @@ function VisitInfoRow({
   const displayValue =
     label === "이용요금" ? summarizeHomeFee(value) : formatHomeDetailValue(value, label);
   return (
-    <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-3 py-4">
+    <div data-speakable className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-3 py-4">
       <span className="bg-surface text-steel grid h-10 w-10 place-items-center rounded-md">
         <Icon className="h-5 w-5" aria-hidden={true} />
       </span>

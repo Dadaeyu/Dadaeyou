@@ -8,6 +8,7 @@ import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { formatDate } from "./helpers";
 import { AdminFormShell, AdminListShell } from "./AdminListShell";
 import { AdminSearchBar } from "./AdminSearchBar";
+import { Select } from "@/components/ui/Select";
 import { useAdminListMode } from "./useAdminListMode";
 import {
   fieldInputClass,
@@ -304,18 +305,16 @@ export function BoardPostsSection() {
             onChange={setSearchInput}
             placeholder="제목 또는 작성자 검색"
           />
-          <select
+          <Select
             value={boardFilter}
-            onChange={(e) => setFilter("boardId", e.target.value === "all" ? null : e.target.value)}
-            className={fieldSelectClass}
-          >
-            <option value="all">전체 게시판</option>
-            {boards.map((b) => (
-              <option key={b.board_id} value={String(b.board_id)}>
-                {b.board_nm}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setFilter("boardId", v === "all" ? null : v)}
+            ariaLabel="게시판 필터"
+            className={`${fieldSelectClass} w-auto`}
+            options={[
+              { value: "all", label: "전체 게시판" },
+              ...boards.map((b) => ({ value: String(b.board_id), label: b.board_nm }))
+            ]}
+          />
         </>
       }
     >

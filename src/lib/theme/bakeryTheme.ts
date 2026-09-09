@@ -1,4 +1,11 @@
 import { supabase } from "@/lib/supabase";
+import {
+  mapBakeryKnowledgeRows,
+  type BakeryAccessibilityKnowledgeSource,
+  type BakeryDetailKnowledgeSource,
+  type BakeryKnowledgeRow,
+  type BakeryPlaceKnowledgeSource
+} from "@/lib/chat/bakeryKnowledge";
 
 // "빵지순례"는 TourAPI 원본 분류(lclssystm1)에 없는 자체 정의 테마라, tb_code에는 가상의
 // 코드(BK)로만 등록해두고 실제 매칭은 이 파일에서 별도 로직으로 계산한다.
@@ -52,4 +59,79 @@ export async function getBakeryPlaceIds(): Promise<number[]> {
   }
 
   return [...ids];
+}
+
+export async function getBakeryContentIds(): Promise<string[]> {
+  const placeIds = await getBakeryPlaceIds();
+  if (!placeIds.length) return [];
+
+  const { data, error } = await supabase
+    .from("tb_place")
+    .select("contentid")
+    .in("place_id", placeIds)
+    .or("delete_yn.is.null,delete_yn.eq.N")
+    .eq("use_yn", "Y");
+
+  if (error) {
+    throw new Error(`빵집 테마 content id 조회 실패: ${error.message}`);
+  }
+
+  return Array.from(
+    new Set(
+      (data ?? [])
+        .map((row) => row.contentid)
+        .filter((contentId): contentId is string | number => contentId !== null)
+        .map(String)
+    )
+  );
+}
+
+export async function getBakeryChatKnowledgeRows(): Promise<BakeryKnowledgeRow[]> {
+  const placeIds = await getBakeryPlaceIds();
+  if (!placeIds.length) return [];
+
+  const { data: places, error: placesError } = await supabase
+    .from("tb_place")
+    .select("contentid,title,addr1,mapx,mapy")
+    .in("place_id", placeIds)
+    .or("delete_yn.is.null,delete_yn.eq.N")
+    .eq("use_yn", "Y")
+    .not("contentid", "is", null)
+    .not("title", "is", null);
+
+  if (placesError) {
+    throw new Error(`빵집 테마 장소 조회 실패: ${placesError.message}`);
+  }
+
+  const contentIds = Array.from(
+    new Set((places ?? []).map((row) => String(row.contentid)).filter(Boolean))
+  );
+  if (!contentIds.length) return [];
+
+  const [{ data: details, error: detailsError }, { data: accessibility, error: accessError }] =
+    await Promise.all([
+      supabase
+        .from("tb_place_detail_normalized")
+        .select("contentid,overview,tel,usetime,restdate,usefee,parking")
+        .in("contentid", contentIds),
+      supabase
+        .from("tb_place_barrierfree")
+        .select(
+          "contentid,parking,route,publictransport,wheelchair,exit,elevator,restroom,stroller,lactationroom"
+        )
+        .in("contentid", contentIds)
+    ]);
+
+  if (detailsError) {
+    throw new Error(`빵집 테마 상세 정보 조회 실패: ${detailsError.message}`);
+  }
+  if (accessError) {
+    throw new Error(`빵집 테마 접근성 정보 조회 실패: ${accessError.message}`);
+  }
+
+  return mapBakeryKnowledgeRows(
+    (places ?? []) as BakeryPlaceKnowledgeSource[],
+    (details ?? []) as BakeryDetailKnowledgeSource[],
+    (accessibility ?? []) as BakeryAccessibilityKnowledgeSource[]
+  );
 }

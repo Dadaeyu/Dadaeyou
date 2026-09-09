@@ -72,6 +72,20 @@ export function uniqueChatSuggestions(values: string[], limit = 4) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).slice(0, limit);
 }
 
+export function shouldReturnChatPlaceCards({
+  intent,
+  isFollowUp,
+  hasPlaces
+}: {
+  intent: "recommend_place" | "check_accessibility" | "ask_info";
+  isFollowUp: boolean;
+  hasPlaces: boolean;
+}) {
+  if (!hasPlaces) return false;
+  if (intent === "recommend_place") return true;
+  return !isFollowUp;
+}
+
 function decodeHtmlEntities(value: string) {
   return value.replace(/&(#x[\da-f]+|#\d+|amp|apos|gt|lt|nbsp|quot);/giu, (_, entity: string) => {
     const normalized = entity.toLocaleLowerCase("en-US");

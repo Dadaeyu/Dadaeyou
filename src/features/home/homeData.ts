@@ -447,17 +447,17 @@ export function homeNeedIdsToStorageValues(ids: readonly HomeNeedId[]): string[]
 export function homeNeedIdsToChatNeeds(ids: readonly HomeNeedId[]): string[] {
   const values = new Set<string>();
   for (const id of ids) {
-    if (id === "step_free") values.add("mobility_access");
+    if (id === "step_free") values.add("step_free");
     if (id === "short_distance") values.add("short_distance");
     if (id === "visual_guidance") values.add("visual_impairment");
     if (id === "hearing_guidance") values.add("hearing_impairment");
     if (id === "easy_explanation") values.add("easy_explanation");
-    if (id === "accessible_toilet") values.add("mobility_access");
+    if (id === "accessible_toilet") values.add("accessible_toilet");
     if (id === "stroller_friendly") values.add("stroller");
     if (id === "family_support") values.add("stroller");
     if (id === "guided_support") values.add("visual_impairment");
-    if (id === "parking_friendly") values.add("mobility_access");
-    if (id === "public_transport_ready") values.add("mobility_access");
+    if (id === "parking_friendly") values.add("accessible_parking");
+    if (id === "public_transport_ready") values.add("public_transport");
   }
   return [...values];
 }

@@ -26,6 +26,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Tabs } from "@/components/ui/Tabs";
+import { Select } from "@/components/ui/Select";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   formatCommunityDate,
@@ -232,21 +233,17 @@ function PageSizeSelect({
   disabled?: boolean;
 }) {
   return (
-    <label className="text-steel flex min-h-11 items-center gap-2 text-sm">
+    <div className="text-steel flex min-h-11 items-center gap-2 text-sm">
       <span className="whitespace-nowrap">표시</span>
-      <select
-        value={value}
+      <Select
+        value={String(value)}
         disabled={disabled}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="border-hairline bg-background text-ink focus:ring-brand-500 min-h-11 rounded-xl border px-3 py-2 text-sm focus:ring-2 focus:outline-none"
-      >
-        {COMMUNITY_PAGE_SIZES.map((n) => (
-          <option key={n} value={n}>
-            {n}개씩
-          </option>
-        ))}
-      </select>
-    </label>
+        onChange={(v) => onChange(Number(v))}
+        ariaLabel="표시"
+        className="bg-background text-ink min-h-11 w-auto rounded-xl px-3 py-2 text-sm"
+        options={COMMUNITY_PAGE_SIZES.map((n) => ({ value: String(n), label: `${n}개씩` }))}
+      />
+    </div>
   );
 }
 
@@ -1927,7 +1924,7 @@ function CommunityDetail({ id }: { id: string }) {
       <article className="border-hairline-soft bg-background overflow-hidden rounded-2xl border">
         <header
           className="border-hairline-soft space-y-3 border-b px-5 py-5 sm:px-7 sm:py-6"
-          data-speak-group="true"
+          data-speakable="true"
           tabIndex={0}
           aria-label={`${post.title}, 작성자 ${post.writer_nm}, ${formatCommunityDateTimeForSpeech(post.created_at)} 작성`}
         >
@@ -1945,7 +1942,7 @@ function CommunityDetail({ id }: { id: string }) {
         </header>
         <div
           className="bg-surface-soft/40 px-5 py-6 sm:px-7 sm:py-8"
-          data-speak-group="true"
+          data-speakable="true"
           tabIndex={0}
           aria-label={`본문 내용, ${post.content}`}
         >
@@ -2013,7 +2010,7 @@ function CommunityDetail({ id }: { id: string }) {
               aria-label={`첨부된 장소, ${post.attached_place.name}${
                 post.rating != null ? `, 별점 ${post.rating}점` : ""
               }, 지도에서 보기`}
-              data-speak-group="true"
+              data-speakable="true"
               className="border-brand-100 hover:bg-brand-50 hover:border-brand-300 bg-background flex w-full items-center gap-3 rounded-full border p-3.5 text-left transition-colors"
             >
               {post.attached_place.image ? (
@@ -2053,7 +2050,7 @@ function CommunityDetail({ id }: { id: string }) {
               aria-label={`첨부된 코스, ${post.attached_course.course_nm}${
                 post.course_rating != null ? `, 별점 ${post.course_rating}점` : ""
               }, 코스 상세보기`}
-              data-speak-group="true"
+              data-speakable="true"
               className="border-navy-100 hover:border-navy-300 hover:bg-navy-50 bg-background flex w-full items-center gap-3 rounded-full border p-3.5 text-left transition-colors"
             >
               <div className="bg-navy-100 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
@@ -2222,8 +2219,8 @@ function CommunityDetail({ id }: { id: string }) {
               comments.map((c) => (
                 <div
                   key={c.id}
-                  className="bg-surface-soft rounded-lg p-4"
-                  data-speak-group="true"
+                  className="bg-surface-soft border-hairline rounded-lg border p-4"
+                  data-speakable="true"
                   tabIndex={0}
                   aria-label={`작성자 ${c.author_nickname}, ${formatCommunityDateTimeForSpeech(c.created_at)} 작성, ${c.content}`}
                 >

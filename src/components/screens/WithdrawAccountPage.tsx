@@ -5,32 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/Button";
-
-const CONFIRM_PHRASE = "탈퇴합니다";
-
-function hasEmailPasswordAuth(
-  user: {
-    email?: string | null;
-    identities?: { provider: string }[] | null;
-    app_metadata?: { provider?: string; providers?: string[] };
-  } | null
-): boolean {
-  if (!user) return false;
-  if (user.identities?.some((identity) => identity.provider === "email")) return true;
-  const providers = user.app_metadata?.providers ?? [];
-  if (providers.length > 0) return providers.includes("email");
-  if (user.email) {
-    const provider = user.app_metadata?.provider ?? "email";
-    return provider === "email";
-  }
-  return false;
-}
+import { hasEmailPasswordAuth } from "@/lib/auth/auth-kind";
+import { WITHDRAW_CONFIRM_TEXT } from "@/lib/auth/withdraw";
 
 const inputClass =
   "border-hairline bg-background text-ink placeholder:text-stone focus:ring-brand-500 w-full rounded-lg border px-3 py-2.5 text-sm focus:ring-2 focus:outline-none";
 
 export function WithdrawAccountPage() {
-  const { user, member, refreshMember, signOut } = useAuth();
+  const { user, member, signOut } = useAuth();
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirmText, setConfirmText] = useState("");
@@ -38,7 +20,9 @@ export function WithdrawAccountPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const isEmailUser = hasEmailPasswordAuth(user);
-  const canSubmit = isEmailUser ? password.length > 0 : confirmText.trim() === CONFIRM_PHRASE;
+  const canSubmit = isEmailUser
+    ? password.length > 0
+    : confirmText.trim() === WITHDRAW_CONFIRM_TEXT;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -56,10 +40,9 @@ export function WithdrawAccountPage() {
         setError(data.error ?? "탈퇴 처리에 실패했습니다.");
         return;
       }
-      await signOut();
-      await refreshMember();
-      router.replace("/login?withdrawn=1");
-      router.refresh();
+      await signOut().catch(() => {});
+      window.location.replace("/login?notice=withdrawn");
+      return;
     } catch {
       setError("네트워크 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
@@ -112,7 +95,9 @@ export function WithdrawAccountPage() {
           <label className="block space-y-1.5">
             <span className="text-ink text-sm font-medium">
               확인을 위해{" "}
-              <span className="font-semibold text-red-600 dark:text-red-400">{CONFIRM_PHRASE}</span>{" "}
+              <span className="font-semibold text-red-600 dark:text-red-400">
+                {WITHDRAW_CONFIRM_TEXT}
+              </span>{" "}
               를 입력해 주세요
             </span>
             <input
@@ -120,7 +105,7 @@ export function WithdrawAccountPage() {
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
               className={inputClass}
-              placeholder={CONFIRM_PHRASE}
+              placeholder={WITHDRAW_CONFIRM_TEXT}
               autoComplete="off"
               required
             />

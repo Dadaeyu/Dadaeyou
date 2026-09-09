@@ -20,8 +20,8 @@
     "path": "../../private/android-signing/dadaeyu-upload.jks",
     "alias": "dadaeyu-upload"
   },
-  "appVersionName": "1.0.1",
-  "appVersionCode": 2,
+  "appVersionName": "1.0.2",
+  "appVersionCode": 4,
   "shortcuts": [
     {
       "name": "지도에서 장소 찾기",
@@ -51,12 +51,20 @@
   "isChromeOSOnly": false,
   "isMetaQuest": false,
   "fullScopeUrl": "https://dadaeyu.vercel.app/",
-  "minSdkVersion": 21,
+  "minSdkVersion": 23,
   "orientation": "any",
   "fingerprints": [
     {
-      "name": "Play Console Digital Asset Links key",
+      "name": "Play classical app signing key",
+      "value": "50:D8:F3:CA:1A:41:73:30:13:84:0E:21:23:72:7C:1C:9B:3D:73:35:0C:DD:D1:34:01:CA:B4:54:38:5B:4E:57"
+    },
+    {
+      "name": "Play quantum-ready app signing key",
       "value": "AB:54:5D:67:99:AF:7C:71:65:97:EA:D8:C2:16:FE:73:A6:C2:1F:01:74:1A:8A:51:82:A8:98:A0:04:06:B8:7C"
+    },
+    {
+      "name": "Upload signing key",
+      "value": "8A:E2:7B:BB:05:05:25:AB:A6:60:85:75:9F:E4:08:D1:C4:E1:E7:7A:7B:9C:DE:B1:46:0E:73:9E:E1:0C:0B:0C"
     }
   ],
   "additionalTrustedOrigins": [],
@@ -65,5 +73,5 @@
   "fileHandlers": [],
   "launchHandlerClientMode": "",
   "displayOverride": [],
-  "appVersion": "1.0.1"
+  "appVersion": "1.0.2"
 }

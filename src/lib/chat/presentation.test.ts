@@ -4,6 +4,7 @@ import {
   formatChatAccessibilityText,
   formatChatDisplayText,
   getPublicChatSourceLabel,
+  shouldReturnChatPlaceCards,
   uniqueChatSuggestions
 } from "./presentation.ts";
 
@@ -41,5 +42,49 @@ test("follow-up suggestions remove duplicates and respect the visible limit", ()
       2
     ),
     ["장소 자세히 알려줘", "유모차 기준으로 다시 알려줘"]
+  );
+});
+
+test("place cards stay visible for recommendation narrowing but not for detail-only follow-ups", () => {
+  assert.equal(typeof shouldReturnChatPlaceCards, "function");
+  assert.equal(
+    shouldReturnChatPlaceCards({
+      intent: "recommend_place",
+      isFollowUp: true,
+      hasPlaces: true
+    }),
+    true
+  );
+  assert.equal(
+    shouldReturnChatPlaceCards({
+      intent: "check_accessibility",
+      isFollowUp: true,
+      hasPlaces: true
+    }),
+    false
+  );
+  assert.equal(
+    shouldReturnChatPlaceCards({
+      intent: "check_accessibility",
+      isFollowUp: false,
+      hasPlaces: true
+    }),
+    true
+  );
+  assert.equal(
+    shouldReturnChatPlaceCards({
+      intent: "ask_info",
+      isFollowUp: false,
+      hasPlaces: true
+    }),
+    true
+  );
+  assert.equal(
+    shouldReturnChatPlaceCards({
+      intent: "ask_info",
+      isFollowUp: true,
+      hasPlaces: true
+    }),
+    false
   );
 });

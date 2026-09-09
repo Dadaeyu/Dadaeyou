@@ -24,6 +24,7 @@ export default function Header() {
     try {
       await auth.signOut();
       router.push("/");
+      router.refresh();
     } finally {
       setLoggingOut(false);
     }
@@ -37,6 +38,7 @@ export default function Header() {
         {/* 브랜드 로고 — 마크(위치핀+하트) + 워드마크 */}
         <Link
           href="/"
+          replace
           className="group flex min-h-12 shrink-0 items-center gap-2.5"
           aria-label="다대유 - 대전 무장애 여행 홈"
         >
@@ -93,12 +95,15 @@ export default function Header() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="inline-flex min-h-11 min-w-11 px-2 sm:min-h-12 sm:px-3"
+                className="h-auto min-h-11 flex-col gap-0.5 px-2 py-1.5 sm:min-h-12"
                 disabled={loggingOut}
                 onClick={handleLogout}
+                aria-label="로그아웃"
               >
                 <LogOut className="h-4 w-4" />
-                <span className="hidden sm:inline">{loggingOut ? "로그아웃 중…" : "로그아웃"}</span>
+                <span className="text-[10px] leading-none font-medium whitespace-nowrap">
+                  {loggingOut ? "로그아웃 중…" : "로그아웃"}
+                </span>
               </Button>
             </>
           ) : (
@@ -106,11 +111,13 @@ export default function Header() {
               variant="ghost"
               size="sm"
               asChild
-              className="inline-flex min-h-11 min-w-11 px-2 sm:min-h-12 sm:min-w-[3.25rem] sm:px-3"
+              className="h-auto min-h-11 flex-col gap-0.5 px-2 py-1.5 sm:min-h-12"
             >
               <Link href={`/login?next=${encodeURIComponent(pathname)}`} aria-label="로그인">
-                <LogIn className="h-4 w-4 sm:hidden" />
-                <span className="hidden sm:inline">로그인</span>
+                <LogIn className="h-4 w-4" />
+                <span className="text-[10px] leading-none font-medium whitespace-nowrap">
+                  로그인
+                </span>
               </Link>
             </Button>
           )}

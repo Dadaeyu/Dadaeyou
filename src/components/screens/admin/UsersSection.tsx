@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { type UserRole, type UserStatus } from "@/lib/supabase/types";
 import { CommunityLevelBadge } from "@/components/community/CommunityLevelBadge";
 import { AdminSearchBar } from "./AdminSearchBar";
+import { Select } from "@/components/ui/Select";
 import { formatDate } from "./helpers";
 import {
   adminAlertClass,
@@ -149,26 +150,24 @@ export function UsersSection() {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
         <AdminSearchBar value={query} onChange={setQuery} placeholder="닉네임 또는 이메일 검색" />
         <div className="flex shrink-0 gap-2">
-          <select
+          <Select
             value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value as "all" | UserRole)}
-            className={`${fieldSelectClass} min-w-[7.5rem]`}
-          >
-            <option value="all">전체 역할</option>
-            <option value="user">일반</option>
-            <option value="admin">관리자</option>
-          </select>
-          <select
+            onChange={(v) => setRoleFilter(v as "all" | UserRole)}
+            ariaLabel="역할 필터"
+            className={`${fieldSelectClass} w-auto min-w-[7.5rem]`}
+            options={[
+              { value: "all", label: "전체 역할" },
+              { value: "user", label: "일반" },
+              { value: "admin", label: "관리자" }
+            ]}
+          />
+          <Select
             value={sortKey}
-            onChange={(e) => setSortKey(e.target.value as SortKey)}
-            className={`${fieldSelectClass} min-w-[8.5rem]`}
-          >
-            {SORT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setSortKey(v as SortKey)}
+            ariaLabel="정렬 기준"
+            className={`${fieldSelectClass} w-auto min-w-[8.5rem]`}
+            options={SORT_OPTIONS}
+          />
         </div>
       </div>
 

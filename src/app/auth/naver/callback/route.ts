@@ -8,12 +8,22 @@ import {
   NAVER_OAUTH_STATE_COOKIE,
   resolveNaverAuthEmail
 } from "@/lib/auth/naver-oauth";
-import { establishSessionForEmail } from "@/lib/auth/naver-session";
+import { isGeneratedNickname } from "@/lib/auth/display-nickname";
+import { establishSessionForEmail, retireWithdrawnNaverUser } from "@/lib/auth/naver-session";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ensureMemberExists } from "@/lib/supabase/ensure-member";
+import { T } from "@/lib/supabase/tables";
 
 function loginFail(origin: string): NextResponse {
   return NextResponse.redirect(`${origin}/login?error=auth_callback_failed`);
+}
+
+function humanProfileName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || isGeneratedNickname(trimmed)) return undefined;
+  return trimmed;
 }
 
 export async function GET(request: Request) {
@@ -43,21 +53,44 @@ export async function GET(request: Request) {
     const profile = profileResult.profile;
     const sub = String(profile.sub);
     const email = resolveNaverAuthEmail(sub, profile.email);
-    const nickname =
-      typeof profile.nickname === "string"
-        ? profile.nickname
-        : typeof profile.name === "string"
-          ? profile.name
-          : undefined;
-    const name = typeof profile.name === "string" ? profile.name : nickname;
+    const profileEmail =
+      typeof profile.email === "string" ? profile.email.trim().toLowerCase() : undefined;
+    const nickname = humanProfileName(profile.nickname) ?? humanProfileName(profile.name);
+    const name = humanProfileName(profile.name) ?? nickname;
     const avatarUrl = typeof profile.profile_image === "string" ? profile.profile_image : undefined;
 
-    const user = await establishSessionForEmail(email, {
+    const sessionMeta = {
       nickname,
       name,
       avatar_url: avatarUrl,
-      naver_id: sub
-    });
+      naver_id: sub,
+      profileEmail
+    };
+
+    let user = await establishSessionForEmail(email, sessionMeta);
+
+    const admin = createAdminClient();
+    let { data: member } = await admin
+      .from(T.members)
+      .select("status")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (member?.status === "withdrawn") {
+      await retireWithdrawnNaverUser(user).catch(() => {});
+      const supabase = await createClient();
+      await supabase.auth.signOut();
+      user = await establishSessionForEmail(email, sessionMeta);
+      ({ data: member } = await admin
+        .from(T.members)
+        .select("status")
+        .eq("id", user.id)
+        .maybeSingle());
+      if (member?.status === "withdrawn") {
+        await supabase.auth.signOut();
+        return loginFail(origin);
+      }
+    }
 
     try {
       await ensureMemberExists(user);

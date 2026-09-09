@@ -1,4 +1,5 @@
 import type { User } from "@supabase/supabase-js";
+import { suggestedNicknameFromAuthUser } from "@/lib/auth/display-nickname";
 import { normalizePhone } from "@/lib/auth/phone";
 import {
   parseAccessibilityNeedsFromMetadata,
@@ -12,16 +13,7 @@ type MemberRow = {
 };
 
 function deriveBaseNickname(user: User): string {
-  const meta = user.user_metadata ?? {};
-  const candidates = [meta.nickname, meta.name, meta.full_name, user.email?.split("@")[0]];
-
-  for (const value of candidates) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  return `user_${user.id.replace(/-/g, "").slice(0, 8)}`;
+  return suggestedNicknameFromAuthUser(user) || `user_${user.id.replace(/-/g, "").slice(0, 8)}`;
 }
 
 async function findAvailableNickname(baseNickname: string): Promise<string> {

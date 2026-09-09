@@ -42,7 +42,7 @@ export function FilterToggleSection({
   };
 
   return (
-    <div className="shrink-0 border-b border-gray-100">
+    <div className="border-hairline shrink-0 border-b">
       <div className="flex items-center">
         <button
           onClick={toggleOpen}
@@ -64,14 +64,14 @@ export function FilterToggleSection({
         {activeCount > 0 && (
           <button
             onClick={onReset}
-            className="shrink-0 border-l border-gray-100 px-3 py-2.5 text-xs text-red-400 transition-colors hover:bg-red-50 hover:text-red-600"
+            className="border-hairline shrink-0 border-l px-3 py-2.5 text-xs text-red-400 transition-colors hover:bg-red-50 hover:text-red-600"
           >
             초기화
           </button>
         )}
       </div>
       {open && (
-        <div className="max-h-[190px] overflow-y-auto border-t border-gray-100 px-3 pt-2 pb-3 md:max-h-[270px]">
+        <div className="border-hairline max-h-[190px] overflow-y-auto border-t px-3 pt-2 pb-3 md:max-h-[270px]">
           <FilterFields
             filters={filters}
             set={set}

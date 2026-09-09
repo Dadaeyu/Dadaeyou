@@ -16,6 +16,8 @@ import NoticeModal, {
 } from "@/components/NoticeModal";
 import { LegalLinks } from "@/components/legal/LegalLinks";
 import { NavigationProgress } from "@/components/NavigationProgress";
+import { HomeBackExitGuard } from "@/components/HomeBackExitGuard";
+import { GuestWelcomePrompt } from "@/components/auth/GuestWelcomePrompt";
 import { isPublicLegalPath, shouldShowGlobalLegalFooter } from "@/lib/legal/legalRoutes";
 import { cn } from "@/components/ui/utils";
 
@@ -44,6 +46,7 @@ export default function RootShell({
   const isLegalPage = isPublicLegalPath(pathname);
   const showGlobalLegalFooter = shouldShowGlobalLegalFooter(pathname);
   const [queue, setQueue] = useState<ActiveNotice[]>([]);
+  const [noticeResolvedPath, setNoticeResolvedPath] = useState<string | null>(null);
 
   // 브라우저 첫 진입 시 지도 필터 옵션(접근성/테마)을 미리 받아 전역 캐시에 저장.
   useEffect(() => {
@@ -52,7 +55,10 @@ export default function RootShell({
 
   useEffect(() => {
     if (!isHomePage) {
-      queueMicrotask(() => setQueue([]));
+      queueMicrotask(() => {
+        setQueue([]);
+        setNoticeResolvedPath(pathname);
+      });
       return;
     }
 
@@ -69,13 +75,16 @@ export default function RootShell({
         setQueue(
           notices.filter((notice) => isDisplayableNotice(notice) && !isSnoozedToday(notice.id))
         );
+        setNoticeResolvedPath(pathname);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setNoticeResolvedPath(pathname);
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [isHomePage]);
+  }, [isHomePage, pathname]);
 
   const currentNotice = queue[0] ?? null;
 
@@ -84,8 +93,9 @@ export default function RootShell({
       <AccessibilityProvider>
         <PlacesProvider initialPlaces={places} initialDetails={placeDetails} fromDb={fromDb}>
           <>
-            <div className="bg-background flex min-h-screen flex-col">
+            <div className="bg-background flex min-h-dvh flex-col">
               <NavigationProgress />
+              <HomeBackExitGuard />
               <a
                 href="#main"
                 className="focus:bg-brand-500 sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:rounded-lg focus:px-4 focus:py-2 focus:font-semibold focus:text-white"
@@ -130,6 +140,11 @@ export default function RootShell({
                 }}
               />
             )}
+
+            <GuestWelcomePrompt
+              key={pathname}
+              blocked={isHomePage && (noticeResolvedPath !== pathname || Boolean(currentNotice))}
+            />
           </>
         </PlacesProvider>
       </AccessibilityProvider>
