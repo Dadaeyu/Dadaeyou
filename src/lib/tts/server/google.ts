@@ -14,6 +14,7 @@ import {
   reserveGoogleTextToSpeechUsage,
   type GoogleTextToSpeechUsageReservation
 } from "@/lib/tts/server/google-usage";
+import { getServerTiming } from "@/lib/performance/serverTiming";
 
 const DEFAULT_VOICE = "ko-KR-Chirp3-HD-Sulafat";
 const DEFAULT_SPEED = 1;
@@ -74,24 +75,33 @@ export class GoogleTextToSpeechProvider implements TextToSpeechProvider {
     }
 
     const client = this.getClient();
-    const reservation = await reserveGoogleTextToSpeechUsage(text, options.clientKey);
+    const timing = getServerTiming();
+    const reservation = timing
+      ? await timing.measure("tts-reserve", () =>
+          reserveGoogleTextToSpeechUsage(text, options.clientKey!)
+        )
+      : await reserveGoogleTextToSpeechUsage(text, options.clientKey);
     const voice = resolveVoice(requestedVoice ?? this.defaultVoice);
 
     try {
-      const [response] = await withAbort(
-        client.synthesizeSpeech({
-          audioConfig: {
-            audioEncoding: "MP3",
-            speakingRate: this.speed
-          },
-          input: { text },
-          voice: {
-            languageCode: "ko-KR",
-            name: voice
-          }
-        }),
-        options?.signal
-      );
+      const synthesize = () =>
+        withAbort(
+          client.synthesizeSpeech({
+            audioConfig: {
+              audioEncoding: "MP3",
+              speakingRate: this.speed
+            },
+            input: { text },
+            voice: {
+              languageCode: "ko-KR",
+              name: voice
+            }
+          }),
+          options?.signal
+        );
+      const [response] = timing
+        ? await timing.measure("tts-synthesize", synthesize)
+        : await synthesize();
       const audioContent = response.audioContent;
 
       if (!audioContent) {
@@ -103,7 +113,11 @@ export class GoogleTextToSpeechProvider implements TextToSpeechProvider {
           ? Uint8Array.from(Buffer.from(audioContent, "base64"))
           : Uint8Array.from(audioContent);
 
-      await finalizeReservedUsage(reservation);
+      if (timing) {
+        await timing.measure("tts-finalize", () => finalizeReservedUsage(reservation));
+      } else {
+        await finalizeReservedUsage(reservation);
+      }
 
       return {
         contentType: "audio/mpeg",
