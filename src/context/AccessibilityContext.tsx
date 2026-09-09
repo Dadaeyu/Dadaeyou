@@ -20,7 +20,7 @@ import {
   findNextSpeakableBlock,
   findSpeakableBlock,
   getSpeakableText,
-  HOVER_SPEAK_SELECTOR,
+  findHoverSpeakableBlock,
   isA11yChrome,
   loadAccessibilityState,
   mergeAccessibilityPreferences,
@@ -210,9 +210,8 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
       const target = resolveSpeechTarget(raw);
       if (isA11yChrome(target)) return;
 
-      // 버튼·링크가 있으면 그걸 우선하고(목록은 카드 전체가 링크), 없으면 클릭과 같은 기준으로
-      // 가장 가까운 내용 블록을 읽는다 — 상세 화면처럼 본문이 일반 텍스트인 곳도 호버로 읽히게.
-      const block = target.closest(HOVER_SPEAK_SELECTOR) ?? findSpeakableBlock(target);
+      // 버튼·링크와 명시적 안내 행을 우선하고, 나머지는 커서 아래 텍스트를 읽는다.
+      const block = findHoverSpeakableBlock(target);
       if (!block) return;
 
       if (speakBlock(block)) speakSourceRef.current = "hover";

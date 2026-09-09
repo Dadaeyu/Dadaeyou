@@ -23,6 +23,7 @@ import {
   Accessibility,
   ArrowRight,
   Heart,
+  LoaderCircle,
   MapPin,
   MessageCircle,
   Mic,
@@ -30,6 +31,7 @@ import {
   Route,
   Send,
   Star,
+  Square,
   Volume2,
   VolumeX,
   X
@@ -229,6 +231,7 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
   const relatedRequestsRef = useRef(new Set<AbortController>());
   const speechRequestIdRef = useRef(0);
   const {
+    status: ttsStatus,
     isAvailable: ttsSupported,
     speak: speakWithTts,
     stop: stopTts,
@@ -320,8 +323,8 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
       void speakWithTts({
         text,
         onEnd: finish,
-        onError: () => {
-          setVoiceInputStatus("답변 음성을 재생하지 못했어요. 잠시 뒤 다시 시도해 주세요.");
+        onError: (error) => {
+          setVoiceInputStatus(error.message);
           finish();
         }
       });
@@ -845,6 +848,7 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
                 response={message.content}
                 disabled={isLoading || isConversationMode}
                 isSpeaking={speakingMessageId === message.id}
+                isPreparing={speakingMessageId === message.id && ttsStatus === "loading"}
                 onChipClick={sendMessage}
                 onSpeak={speakMessage}
                 onStopSpeaking={stopSpeech}
@@ -869,12 +873,17 @@ export default function Chatbot({ onClose, accessibilityNeeds = [] }: Props) {
           </div>
         )}
         {isLoading ? (
-          <div className="flex items-end gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             <DaiyuAvatar />
-            <div className="flex gap-1 rounded-2xl rounded-bl-md border border-gray-200 bg-white px-4 py-3 shadow-sm">
-              <span className="bg-brand-500 h-2 w-2 animate-bounce rounded-full [animation-delay:-0.2s]" />
-              <span className="bg-brand-500 h-2 w-2 animate-bounce rounded-full [animation-delay:-0.1s]" />
-              <span className="bg-brand-500 h-2 w-2 animate-bounce rounded-full" />
+            <div
+              role="status"
+              className="text-brand-800 flex min-h-12 items-center gap-2 rounded-2xl rounded-bl-md border border-gray-200 bg-white px-4 py-3 text-sm font-medium shadow-sm"
+            >
+              <LoaderCircle
+                className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none"
+                aria-hidden="true"
+              />
+              <span>다유가 답변을 준비하고 있어요</span>
             </div>
             <button
               type="button"
@@ -1263,6 +1272,7 @@ function AssistantMessage({
   response,
   disabled,
   isSpeaking,
+  isPreparing,
   onChipClick,
   onSpeak,
   onStopSpeaking,
@@ -1272,6 +1282,7 @@ function AssistantMessage({
   response: ChatResponse;
   disabled: boolean;
   isSpeaking: boolean;
+  isPreparing: boolean;
   onChipClick: (message: string) => Promise<void>;
   onSpeak: (messageId: number, text: string) => void;
   onStopSpeaking: () => void;
@@ -1292,18 +1303,40 @@ function AssistantMessage({
               }
               onSpeak(messageId, response.message);
             }}
-            className="border-brand-200 text-brand-800 hover:border-brand-400 hover:bg-brand-50 inline-flex h-11 w-11 items-center justify-center rounded-xl border bg-white transition-colors disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-500"
-            aria-label={isSpeaking ? "답변 음성 중지" : "답변 음성 재생"}
-            title={isSpeaking ? "음성 재생 중지" : "답변 음성 재생"}
+            className="border-brand-200 text-brand-800 hover:border-brand-400 hover:bg-brand-50 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border bg-white px-3 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-500"
+            aria-label={
+              isPreparing ? "음성 생성 취소" : isSpeaking ? "답변 음성 중지" : "답변 음성 재생"
+            }
+            title={
+              isPreparing
+                ? "음성 준비 중 · 누르면 취소"
+                : isSpeaking
+                  ? "음성 재생 중지"
+                  : "답변 음성 재생"
+            }
           >
-            {isSpeaking ? (
-              <VolumeX className="h-3.5 w-3.5" aria-hidden="true" />
+            {isPreparing ? (
+              <LoaderCircle
+                className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none"
+                aria-hidden="true"
+              />
+            ) : isSpeaking ? (
+              <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
             ) : (
               <Volume2 className="h-3.5 w-3.5" aria-hidden="true" />
             )}
+            <span>{isPreparing ? "준비 중 · 취소" : isSpeaking ? "읽기 중지" : "답변 읽기"}</span>
           </button>
         </div>
-        <p className="text-[15px] leading-7 font-semibold whitespace-pre-line text-gray-950 sm:text-[16px] sm:leading-7">
+        {isPreparing && (
+          <p role="status" className="mb-2 text-xs text-gray-600">
+            음성을 준비하고 있어요. 긴 답변은 시간이 더 걸릴 수 있어요.
+          </p>
+        )}
+        <p
+          data-speakable
+          className="text-[15px] leading-7 font-semibold whitespace-pre-line text-gray-950 sm:text-[16px] sm:leading-7"
+        >
           {formatChatDisplayText(response.message)}
         </p>
         {!ttsSupported ? (

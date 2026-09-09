@@ -10,6 +10,7 @@ import {
   loadAccessibilityState,
   mergeAccessibilityPreferences,
   saveAccessibilityState,
+  findHoverSpeakableBlock,
   findNextSpeakableBlock,
   findSpeakableBlock,
   getSpeakableText,
@@ -441,69 +442,81 @@ test("다음 내용 블록은 문서 순서의 다음 후보를 고른다", () =
 test("호버 이탈: 창 밖·빈 영역은 멈추고 버튼·내용 블록 위는 유지한다", () => {
   assert.equal(shouldStopHoverSpeech(null), true);
 
-  const emptyDiv = {
-    tagName: "DIV",
-    parentElement: null,
-    closest() {
-      return null;
-    },
-    matches() {
-      return false;
-    },
-    getAttribute() {
-      return null;
-    }
-  } as unknown as Element;
+  const dom = new JSDOM(
+    `<main><div id="empty"></div><button id="button">지도</button><section id="section">안내 내용</section></main><nav><button id="chrome">메뉴</button></nav>`
+  );
+  const doc = dom.window.document;
+  assert.equal(shouldStopHoverSpeech(doc.getElementById("empty")), true);
+  assert.equal(shouldStopHoverSpeech(doc.getElementById("button")), false);
+  assert.equal(shouldStopHoverSpeech(doc.getElementById("section")), false);
+  assert.equal(shouldStopHoverSpeech(doc.getElementById("chrome")), true);
+});
 
-  const button = {
-    tagName: "BUTTON",
-    parentElement: null,
-    closest(selector: string) {
-      if (selector.includes("button") || selector.includes("role='button'")) return button;
-      if (selector.includes("header") || selector.includes("data-a11y-chrome")) return null;
-      return null;
-    },
-    matches() {
-      return false;
-    },
-    getAttribute() {
-      return null;
-    }
-  } as unknown as Element;
+test("홈의 독립 텍스트와 상세 소제목을 커서 위치에서 읽는다", () => {
+  const dom = new JSDOM(
+    `<main><div><span id="weather">대전 맑음 24도</span></div><div role="dialog"><h4 id="heading">편의시설</h4><div><span id="detail">경사로 있음</span></div></div></main>`
+  );
+  for (const [id, expected] of [
+    ["weather", "대전 맑음 24도"],
+    ["heading", "편의시설"],
+    ["detail", "경사로 있음"]
+  ]) {
+    const target = dom.window.document.getElementById(id)!;
+    assert.equal(getSpeakableText(findHoverSpeakableBlock(target)!), expected);
+    assert.equal(shouldStopHoverSpeech(target), false);
+  }
+});
 
-  const section = {
-    tagName: "SECTION",
-    parentElement: null,
-    closest(selector: string) {
-      if (selector.includes("header") || selector.includes("data-a11y-chrome")) return null;
-      if (selector.includes("data-speakable")) return null;
-      return null;
-    },
-    matches(selector: string) {
-      return selector.includes("section");
-    },
-    getAttribute() {
-      return null;
-    }
-  } as unknown as Element;
+test("중첩 SVG 아이콘 위에서도 부모 버튼을 읽는다", () => {
+  const dom = new JSDOM(
+    `<main><button aria-label="지도 보기"><svg aria-hidden="true"><g><path id="icon" /></g></svg></button></main>`
+  );
+  const target = dom.window.document.getElementById("icon")!;
+  assert.equal(getSpeakableText(findHoverSpeakableBlock(target)!), "지도 보기");
+});
 
-  const chrome = {
-    tagName: "BUTTON",
-    parentElement: null,
-    closest(selector: string) {
-      if (selector.includes("header") || selector.includes("data-a11y-chrome")) return chrome;
-      return null;
-    },
-    matches() {
-      return false;
-    },
-    getAttribute() {
-      return null;
-    }
-  } as unknown as Element;
+test("호버는 명시적 행 단위와 버튼을 유지하고 빈 영역은 읽지 않는다", () => {
+  const dom = new JSDOM(
+    `<main><div data-speakable><span id="row">주소</span><span>대전 서구</span></div><div id="empty"></div><div hidden><p id="hidden">숨김 내용</p></div><button><span id="button">지도 보기</span></button></main>`
+  );
+  const doc = dom.window.document;
+  assert.equal(
+    getSpeakableText(findHoverSpeakableBlock(doc.getElementById("row")!)!),
+    "주소 대전 서구"
+  );
+  assert.equal(
+    getSpeakableText(findHoverSpeakableBlock(doc.getElementById("button")!)!),
+    "지도 보기"
+  );
+  assert.equal(findHoverSpeakableBlock(doc.getElementById("empty")!), null);
+  assert.equal(findHoverSpeakableBlock(doc.getElementById("hidden")!), null);
+});
 
-  assert.equal(shouldStopHoverSpeech(emptyDiv), true);
-  assert.equal(shouldStopHoverSpeech(button), false);
-  assert.equal(shouldStopHoverSpeech(section), false);
-  assert.equal(shouldStopHoverSpeech(chrome), true);
+test("상세 창의 탭과 하단 버튼도 호버로 읽는다", () => {
+  const dom = new JSDOM(
+    `<div role="dialog"><nav><button id="tab">방문 정보</button></nav><footer><a id="map">지도에서 보기</a></footer><div data-a11y-chrome><button id="settings">설정</button></div></div>`
+  );
+  const doc = dom.window.document;
+  assert.equal(getSpeakableText(findHoverSpeakableBlock(doc.getElementById("tab")!)!), "방문 정보");
+  assert.equal(
+    getSpeakableText(findHoverSpeakableBlock(doc.getElementById("map")!)!),
+    "지도에서 보기"
+  );
+  assert.equal(findHoverSpeakableBlock(doc.getElementById("settings")!), null);
+});
+
+test("다유 대화창의 제목, 설정, 답변, 스피커 아이콘과 입력창을 읽는다", () => {
+  const dom = new JSDOM(
+    `<dialog open aria-label="다유 챗봇"><header><span id="title">다유</span></header><details><summary id="settings"><span>음성 부가 설정</span></summary></details><p data-speakable id="answer">휠체어 출입구를 확인해 주세요.</p><button aria-label="답변 음성 재생"><svg aria-hidden="true"><path id="speaker"/></svg></button><input id="question" aria-label="질문 입력" placeholder="질문을 적어 주세요"/></dialog>`
+  );
+  for (const [id, text] of [
+    ["title", "다유"],
+    ["settings", "음성 부가 설정"],
+    ["answer", "휠체어 출입구를 확인해 주세요."],
+    ["speaker", "답변 음성 재생"],
+    ["question", "질문 입력, 질문을 적어 주세요"]
+  ]) {
+    const target = dom.window.document.getElementById(id)!;
+    assert.equal(getSpeakableText(findHoverSpeakableBlock(target)!), text);
+  }
 });

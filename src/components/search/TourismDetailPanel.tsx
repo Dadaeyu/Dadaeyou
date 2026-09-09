@@ -499,7 +499,7 @@ export default function TourismDetailPanel({
           {/* 기본 정보 */}
           <div className="space-y-1.5 text-xs text-gray-600">
             {infoRows.map(({ label, value }) => (
-              <div key={label} className="flex gap-2">
+              <div key={label} data-speakable className="flex gap-2">
                 <span className="w-12 shrink-0 font-medium text-gray-700">{label}</span>
                 <span className="min-w-0 break-words">{renderWithLineBreaks(value)}</span>
               </div>

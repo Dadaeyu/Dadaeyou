@@ -87,7 +87,7 @@ export default function AccessibilitySection({
                 <div className="min-h-0 overflow-hidden">
                   <div className="border-brand-100 space-y-3 border-t px-3 pt-3 pb-3">
                     {group.items.map((item) => (
-                      <div key={item.label}>
+                      <div key={item.label} data-speakable>
                         <div className="mb-0.5 flex items-center gap-1.5">
                           <span className="bg-brand-500 h-1.5 w-1.5 shrink-0 rounded-full" />
                           <span className="text-xs font-semibold text-gray-800">{item.label}</span>
