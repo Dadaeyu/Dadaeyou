@@ -4,11 +4,9 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { MobileNav } from "./layout/Navigation";
 import Header from "./layout/Header";
-import { PlacesProvider } from "@/context/PlacesContext";
 import { AccessibilityProvider } from "@/context/AccessibilityContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { prefetchFilterOptions } from "@/lib/filterOptions";
-import type { Place, PlaceDetail } from "@/data/placesData";
 import NoticeModal, {
   getTodayKey,
   snoozeStorageKey,
@@ -30,17 +28,7 @@ function isSnoozedToday(noticeId: number): boolean {
   }
 }
 
-export default function RootShell({
-  children,
-  places,
-  placeDetails,
-  fromDb
-}: {
-  children: React.ReactNode;
-  places?: Place[];
-  placeDetails?: Record<number, PlaceDetail>;
-  fromDb?: boolean;
-}) {
+export default function RootShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isHomePage = pathname === "/";
   const isLegalPage = isPublicLegalPath(pathname);
@@ -91,62 +79,60 @@ export default function RootShell({
   return (
     <AuthProvider>
       <AccessibilityProvider>
-        <PlacesProvider initialPlaces={places} initialDetails={placeDetails} fromDb={fromDb}>
-          <>
-            <div className="bg-background flex min-h-dvh flex-col">
-              <NavigationProgress />
-              <HomeBackExitGuard />
-              <a
-                href="#main"
-                className="focus:bg-brand-500 sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:rounded-lg focus:px-4 focus:py-2 focus:font-semibold focus:text-white"
-              >
-                본문 바로가기
-              </a>
+        <>
+          <div className="bg-background flex min-h-dvh flex-col">
+            <NavigationProgress />
+            <HomeBackExitGuard />
+            <a
+              href="#main"
+              className="focus:bg-brand-500 sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:rounded-lg focus:px-4 focus:py-2 focus:font-semibold focus:text-white"
+            >
+              본문 바로가기
+            </a>
 
-              <Header />
+            <Header />
 
-              <main
-                id="main"
-                className={cn("flex-1 px-4 py-6 md:px-6 md:pb-6", isLegalPage ? "pb-8" : "pb-24")}
-              >
-                <div className="mx-auto max-w-7xl">{children}</div>
-              </main>
+            <main
+              id="main"
+              className={cn("flex-1 px-4 py-6 md:px-6 md:pb-6", isLegalPage ? "pb-8" : "pb-24")}
+            >
+              <div className="mx-auto max-w-7xl">{children}</div>
+            </main>
 
-              {showGlobalLegalFooter && (
-                <footer className="border-hairline bg-surface-soft/60 border-t px-4 pt-5 pb-24 md:px-6 md:pb-8">
-                  <div className="mx-auto flex max-w-7xl flex-col items-center gap-2 text-center">
-                    <p className="text-stone text-xs font-medium">다대유 서비스 안내</p>
-                    <LegalLinks />
-                  </div>
-                </footer>
-              )}
-
-              {!isLegalPage && <MobileNav />}
-            </div>
-
-            {isHomePage && currentNotice && (
-              <NoticeModal
-                key={currentNotice.id}
-                notice={currentNotice}
-                onClose={({ snoozeToday }) => {
-                  if (snoozeToday) {
-                    try {
-                      localStorage.setItem(snoozeStorageKey(currentNotice.id), getTodayKey());
-                    } catch {
-                      // ignore storage errors
-                    }
-                  }
-                  setQueue((prev) => prev.slice(1));
-                }}
-              />
+            {showGlobalLegalFooter && (
+              <footer className="border-hairline bg-surface-soft/60 border-t px-4 pt-5 pb-24 md:px-6 md:pb-8">
+                <div className="mx-auto flex max-w-7xl flex-col items-center gap-2 text-center">
+                  <p className="text-stone text-xs font-medium">다대유 서비스 안내</p>
+                  <LegalLinks />
+                </div>
+              </footer>
             )}
 
-            <GuestWelcomePrompt
-              key={pathname}
-              blocked={isHomePage && (noticeResolvedPath !== pathname || Boolean(currentNotice))}
+            {!isLegalPage && <MobileNav />}
+          </div>
+
+          {isHomePage && currentNotice && (
+            <NoticeModal
+              key={currentNotice.id}
+              notice={currentNotice}
+              onClose={({ snoozeToday }) => {
+                if (snoozeToday) {
+                  try {
+                    localStorage.setItem(snoozeStorageKey(currentNotice.id), getTodayKey());
+                  } catch {
+                    // ignore storage errors
+                  }
+                }
+                setQueue((prev) => prev.slice(1));
+              }}
             />
-          </>
-        </PlacesProvider>
+          )}
+
+          <GuestWelcomePrompt
+            key={pathname}
+            blocked={isHomePage && (noticeResolvedPath !== pathname || Boolean(currentNotice))}
+          />
+        </>
       </AccessibilityProvider>
     </AuthProvider>
   );

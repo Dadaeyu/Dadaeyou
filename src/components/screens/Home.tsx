@@ -1,18 +1,41 @@
 "use client";
 
 import { useRef, useState } from "react";
-import Chatbot from "@/components/Chatbot";
+import dynamic from "next/dynamic";
 import { useAccessibility } from "@/context/AccessibilityContext";
 import { EasyHome } from "@/features/home/EasyHome";
 import { HomeHero, HomeNeedsPicker } from "@/features/home/HomeHero";
 import { HomeDiscovery } from "@/features/home/HomeDiscovery";
 import { HomeOfficialGuide } from "@/features/home/HomeOfficialGuide";
-import { HomePlaceDialog } from "@/features/home/HomePlaceDialog";
 import { HomeRecommendations } from "@/features/home/HomeRecommendations";
 import { HomeTravelSupport } from "@/features/home/HomeTravelSupport";
 import { HomeWeatherNotice } from "@/features/home/HomeWeatherNotice";
 import { homeNeedIdsToChatNeeds } from "@/features/home/homeData";
 import { useHomeExperience } from "@/features/home/useHomeExperience";
+
+const Chatbot = dynamic(() => import("@/components/Chatbot"), {
+  loading: () => (
+    <p
+      role="status"
+      className="bg-background text-ink fixed right-4 bottom-24 z-50 rounded-xl border p-4 shadow-lg"
+    >
+      채팅창을 불러오는 중입니다.
+    </p>
+  )
+});
+const HomePlaceDialog = dynamic(
+  () => import("@/features/home/HomePlaceDialog").then((module) => module.HomePlaceDialog),
+  {
+    loading: () => (
+      <p
+        role="status"
+        className="bg-background text-ink fixed right-4 bottom-24 z-50 rounded-xl border p-4 shadow-lg"
+      >
+        장소 정보를 불러오는 중입니다.
+      </p>
+    )
+  }
+);
 
 export default function Home() {
   const [chatOpen, setChatOpen] = useState(false);
