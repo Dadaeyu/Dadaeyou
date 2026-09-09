@@ -178,6 +178,14 @@ export async function PATCH(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   }
 
+  // QA 테스트 전용: 첨부 재삽입 실패(백업→삭제→재삽입 실패→복구) 시나리오를 재현하기 위한
+  // 훅. 운영 환경에서는 절대 동작하지 않는다. 사용법:
+  // fetch(`/api/community/board-posts/${id}?debugFailAttachment=images`, { method: "PATCH", ... })
+  const debugFailAttachment =
+    process.env.NODE_ENV !== "production"
+      ? new URL(request.url).searchParams.get("debugFailAttachment")
+      : null;
+
   try {
     const supabase = await createClient();
     const {
@@ -308,26 +316,86 @@ export async function PATCH(request: Request, { params }: Params) {
       if (updateError) throw updateError;
     }
 
+    // 첨부는 삭제 후 재삽입 방식이라, 재삽입이 실패하면 방금 지운 원래 첨부까지 사라진다.
+    // 지우기 전에 백업해뒀다가 재삽입 실패 시 최대한 복구를 시도한 뒤 에러를 던진다(이 프로젝트
+    // 전반에 트랜잭션이 없어 완벽한 원자성 보장은 못 하지만, 최소한 "성공"으로 잘못 알리거나
+    // 복구 시도 없이 원본을 잃는 일은 막는다).
     if (images !== undefined) {
-      await supabase.from("tb_post_image").delete().eq("post_id", postId);
+      const { data: previousImages, error: previousImagesError } = await supabase
+        .from("tb_post_image")
+        .select("image_url, sort_order")
+        .eq("post_id", postId);
+      if (previousImagesError) throw previousImagesError;
+
+      const { error: deleteImagesError } = await supabase
+        .from("tb_post_image")
+        .delete()
+        .eq("post_id", postId);
+      if (deleteImagesError) throw deleteImagesError;
+
       if (images.length > 0) {
-        await supabase
-          .from("tb_post_image")
-          .insert(images.map((image_url, i) => ({ post_id: postId, image_url, sort_order: i })));
+        const { error: insertImagesError } =
+          debugFailAttachment === "images"
+            ? { error: new Error("[QA 테스트] 이미지 재삽입 강제 실패") }
+            : await supabase
+                .from("tb_post_image")
+                .insert(
+                  images.map((image_url, i) => ({ post_id: postId, image_url, sort_order: i }))
+                );
+        if (insertImagesError) {
+          if (previousImages && previousImages.length > 0) {
+            await supabase.from("tb_post_image").insert(
+              previousImages.map((p) => ({
+                post_id: postId,
+                image_url: p.image_url,
+                sort_order: p.sort_order
+              }))
+            );
+          }
+          throw insertImagesError;
+        }
       }
     }
     if (files !== undefined) {
-      await supabase.from("tb_post_file").delete().eq("post_id", postId);
+      const { data: previousFiles, error: previousFilesError } = await supabase
+        .from("tb_post_file")
+        .select("file_url, file_name, file_size, sort_order")
+        .eq("post_id", postId);
+      if (previousFilesError) throw previousFilesError;
+
+      const { error: deleteFilesError } = await supabase
+        .from("tb_post_file")
+        .delete()
+        .eq("post_id", postId);
+      if (deleteFilesError) throw deleteFilesError;
+
       if (files.length > 0) {
-        await supabase.from("tb_post_file").insert(
-          files.map((f, i) => ({
-            post_id: postId,
-            file_url: f.url,
-            file_name: f.name,
-            file_size: f.size ?? null,
-            sort_order: i
-          }))
-        );
+        const { error: insertFilesError } =
+          debugFailAttachment === "files"
+            ? { error: new Error("[QA 테스트] 파일 재삽입 강제 실패") }
+            : await supabase.from("tb_post_file").insert(
+                files.map((f, i) => ({
+                  post_id: postId,
+                  file_url: f.url,
+                  file_name: f.name,
+                  file_size: f.size ?? null,
+                  sort_order: i
+                }))
+              );
+        if (insertFilesError) {
+          if (previousFiles && previousFiles.length > 0) {
+            await supabase.from("tb_post_file").insert(
+              previousFiles.map((p) => ({
+                post_id: postId,
+                file_url: p.file_url,
+                file_name: p.file_name,
+                file_size: p.file_size,
+                sort_order: p.sort_order
+              }))
+            );
+          }
+          throw insertFilesError;
+        }
       }
     }
 

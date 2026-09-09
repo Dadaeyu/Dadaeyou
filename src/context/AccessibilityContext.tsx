@@ -18,6 +18,7 @@ import {
   FONT_SCALE_MIN,
   FONT_SCALE_STEP,
   getSpeakableText,
+  normalizeForSpeech,
   loadAccessibilityState,
   mergeAccessibilityPreferences,
   saveAccessibilityState,
@@ -34,6 +35,9 @@ interface AccessibilityContextValue extends AccessibilityState {
   increaseFontScale: () => void;
   decreaseFontScale: () => void;
   setFontScale: (value: number) => void;
+  /** 읽어주기가 켜져 있을 때만(꺼져 있으면 아무 것도 안 함) 즉시 텍스트를 읽는다.
+   *  호버/포커스로는 못 잡는 값 변경(예: 필터 선택 결과)을 알릴 때 쓴다. */
+  speak: (text: string) => void;
 }
 
 const AccessibilityContext = createContext<AccessibilityContextValue | null>(null);
@@ -109,8 +113,11 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
     [auth]
   );
 
-  const speak = useCallback((text: string) => {
+  const speak = useCallback((rawText: string) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
+    if (!stateRef.current.readAloud) return;
+
+    const text = normalizeForSpeech(rawText);
     if (lastSpoken.current === text) return;
 
     lastSpoken.current = text;
@@ -129,11 +136,33 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // 카드/구역 하나를 통째로 하나의 문장으로 읽어야 하는 영역(검색 결과, 게시글 제목/본문
+    // 영역 등)에는 data-speak-group을 붙여둔다. 그 영역 안에서 원래 텍스트 자체로도 읽히는
+    // 하위 요소(h1/h3/p — 그룹 라벨에 이미 포함된 중복 텍스트)는 aria-hidden="true"로 표시해
+    // 걸러내고, 파일 링크·이미지 버튼처럼 그룹과 무관하게 자기 고유의 의미가 있는 진짜 상호작용
+    // 요소는 건너뛰지 않고 그대로 읽는다.
+    const SPEAK_SELECTOR =
+      "button, a, [role='button'], [role='link'], input, textarea, select, p, h1, h2, h3, [data-speakable], [data-speak-group]";
+
+    const resolveSpeakTarget = (start: Element): Element | null => {
+      let node: Element | null = start;
+      while (node) {
+        const match: Element | null = node.closest(SPEAK_SELECTOR);
+        if (!match) return null;
+        if (match.getAttribute("aria-hidden") !== "true") return match;
+        node = match.parentElement;
+      }
+      return null;
+    };
+
     const handleFocusIn = (event: FocusEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
 
-      const text = getSpeakableText(target);
+      const speakTarget = resolveSpeakTarget(target);
+      if (!speakTarget) return;
+
+      const text = getSpeakableText(speakTarget);
       if (text) speak(text);
     };
 
@@ -141,12 +170,10 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
       const target = event.target;
       if (!(target instanceof Element)) return;
 
-      const interactive = target.closest(
-        "button, a, [role='button'], [role='link'], input, textarea, select"
-      );
-      if (!interactive || interactive !== target) return;
+      const speakTarget = resolveSpeakTarget(target);
+      if (!speakTarget) return;
 
-      const text = getSpeakableText(interactive);
+      const text = getSpeakableText(speakTarget);
       if (text) speak(text);
     };
 
@@ -220,7 +247,8 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
       toggleReadAloud,
       increaseFontScale,
       decreaseFontScale,
-      setFontScale
+      setFontScale,
+      speak
     }),
     [
       state,
@@ -230,7 +258,8 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
       toggleReadAloud,
       increaseFontScale,
       decreaseFontScale,
-      setFontScale
+      setFontScale,
+      speak
     ]
   );
 

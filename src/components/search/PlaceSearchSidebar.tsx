@@ -142,6 +142,7 @@ export default function PlaceSearchSidebar({
           <input
             type="text"
             placeholder="장소 검색 (Enter)"
+            aria-label="장소 검색, 입력 후 엔터"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && onSearch(keyword)}

@@ -624,11 +624,15 @@ export default function Map() {
             if (filters.favoritesOnly && likedIds.has(sp.id)) {
               return { id: sp.id, lat: sp.lat, lng: sp.lng, color: "#ef4444", shape: "heart" };
             }
+            // 추천 장소(로그인 + 접근성/선호테마 매칭)는 핀 안에 별 표시로 통일한다.
+            // 매칭 이유(접근성/선호테마) 구분은 목록의 텍스트 배지에서만 보여준다.
+            const matchLabel = sp.matchedAccessibility || sp.matchedTheme ? "★" : undefined;
             return {
               id: sp.id,
               lat: sp.lat,
               lng: sp.lng,
-              color: getCategoryColor(sp.categoryCode)
+              color: getCategoryColor(sp.categoryCode),
+              label: matchLabel
             };
           })}
           selectedId={searchDetailId}

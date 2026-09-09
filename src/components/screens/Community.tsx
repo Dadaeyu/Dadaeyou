@@ -27,7 +27,11 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Tabs } from "@/components/ui/Tabs";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { formatCommunityDate, formatCommunityDateTime } from "@/lib/community/format";
+import {
+  formatCommunityDate,
+  formatCommunityDateTime,
+  formatCommunityDateTimeForSpeech
+} from "@/lib/community/format";
 import { COMMUNITY_DEFAULT_PAGE_SIZE, COMMUNITY_PAGE_SIZES } from "@/lib/pagination";
 import { ListPagination } from "@/components/community/ListPagination";
 import { useOptionalAuth } from "@/context/AuthContext";
@@ -570,6 +574,7 @@ export default function Community() {
                 value={boardSearchInput}
                 onChange={(e) => setBoardSearchInput(e.target.value)}
                 placeholder="제목으로 검색"
+                aria-label="제목으로 검색"
                 className="border-hairline bg-background text-ink placeholder:text-stone focus:border-brand-400 focus:ring-brand-500/30 w-full rounded-xl border py-3 pr-4 pl-10 text-sm focus:ring-2 focus:outline-none"
               />
             </div>
@@ -902,15 +907,20 @@ function CommunityWrite() {
     }
   }, [boards, selectedBoard]);
 
+  // contentId/board/edit 같은 쿼리 파라미터가 로그인 후에도 살아남도록 next 경로에 그대로 담는다
+  // (예: 장소 상세에서 "리뷰 쓰기" → 로그인 → 되돌아와도 장소/게시판 선택이 유지되게).
+  const writeNextPath = searchParams.toString()
+    ? `/community/new?${searchParams.toString()}`
+    : "/community/new";
+
   useEffect(() => {
     if (auth?.loading) return;
-    void requireLoginOrRedirect(auth?.user, router, "/community/new", dialogConfirm);
-  }, [auth?.loading, auth?.user, router, dialogConfirm]);
+    void requireLoginOrRedirect(auth?.user, router, writeNextPath, dialogConfirm);
+  }, [auth?.loading, auth?.user, router, dialogConfirm, writeNextPath]);
 
   const handleSubmit = async () => {
     if (!boardId || !title.trim() || !content.trim()) return;
-    if (!(await requireLoginOrRedirect(auth?.user, router, "/community/new", dialogConfirm)))
-      return;
+    if (!(await requireLoginOrRedirect(auth?.user, router, writeNextPath, dialogConfirm))) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -1112,6 +1122,7 @@ function CommunityWrite() {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="제목을 입력해주세요"
+          aria-label="제목을 입력해주세요"
           maxLength={50}
           className="border-hairline bg-background text-ink placeholder:text-stone focus:ring-brand-500 w-full rounded-lg border px-4 py-3 text-sm focus:ring-2 focus:outline-none"
         />
@@ -1125,6 +1136,7 @@ function CommunityWrite() {
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder="여행 후기, 팁, 질문 등 자유롭게 작성해주세요"
+          aria-label="여행 후기, 팁, 질문 등 자유롭게 작성해주세요"
           rows={10}
           className="border-hairline bg-background text-ink placeholder:text-stone focus:ring-brand-500 w-full resize-none rounded-lg border px-4 py-3 text-sm leading-relaxed focus:ring-2 focus:outline-none"
         />
@@ -1483,6 +1495,7 @@ function CommunityDetail({ id }: { id: string }) {
   const [liking, setLiking] = useState(false);
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
+  const [commentsError, setCommentsError] = useState<string | null>(null);
   const [commentInput, setCommentInput] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
@@ -1593,11 +1606,14 @@ function CommunityDetail({ id }: { id: string }) {
 
   const loadComments = useCallback(async () => {
     setCommentsLoading(true);
+    setCommentsError(null);
     try {
       const res = await fetch(`/api/community/board-posts/${id}/comments`);
+      if (!res.ok) throw new Error(await parseJsonError(res, "댓글을 불러오지 못했습니다"));
       const json = (await res.json().catch(() => ({}))) as { comments?: CommentItem[] };
       setComments(json.comments ?? []);
-    } catch {
+    } catch (e) {
+      setCommentsError(e instanceof Error ? e.message : "댓글을 불러오지 못했습니다");
       setComments([]);
     } finally {
       setCommentsLoading(false);
@@ -1909,8 +1925,16 @@ function CommunityDetail({ id }: { id: string }) {
 
       {/* Post */}
       <article className="border-hairline-soft bg-background overflow-hidden rounded-2xl border">
-        <header className="border-hairline-soft space-y-3 border-b px-5 py-5 sm:px-7 sm:py-6">
-          <h1 className="text-ink text-xl leading-snug font-semibold tracking-[-0.03em] sm:text-2xl">
+        <header
+          className="border-hairline-soft space-y-3 border-b px-5 py-5 sm:px-7 sm:py-6"
+          data-speak-group="true"
+          tabIndex={0}
+          aria-label={`${post.title}, 작성자 ${post.writer_nm}, ${formatCommunityDateTimeForSpeech(post.created_at)} 작성`}
+        >
+          <h1
+            aria-hidden="true"
+            className="text-ink text-xl leading-snug font-semibold tracking-[-0.03em] sm:text-2xl"
+          >
             {post.title}
           </h1>
           <div className="text-steel flex flex-wrap items-center gap-2 text-sm">
@@ -1919,8 +1943,16 @@ function CommunityDetail({ id }: { id: string }) {
             <span className="text-stone">{formatCommunityDateTime(post.created_at)}</span>
           </div>
         </header>
-        <div className="bg-surface-soft/40 px-5 py-6 sm:px-7 sm:py-8">
-          <p className="text-steel text-sm leading-relaxed whitespace-pre-wrap md:text-base">
+        <div
+          className="bg-surface-soft/40 px-5 py-6 sm:px-7 sm:py-8"
+          data-speak-group="true"
+          tabIndex={0}
+          aria-label={`본문 내용, ${post.content}`}
+        >
+          <p
+            aria-hidden="true"
+            className="text-steel text-sm leading-relaxed whitespace-pre-wrap md:text-base"
+          >
             {post.content}
           </p>
 
@@ -1978,6 +2010,10 @@ function CommunityDetail({ id }: { id: string }) {
           {post.attached_place && (
             <button
               onClick={() => router.push(`/map?contentId=${post.attached_place!.content_id}`)}
+              aria-label={`첨부된 장소, ${post.attached_place.name}${
+                post.rating != null ? `, 별점 ${post.rating}점` : ""
+              }, 지도에서 보기`}
+              data-speak-group="true"
               className="border-brand-100 hover:bg-brand-50 hover:border-brand-300 bg-background flex w-full items-center gap-3 rounded-full border p-3.5 text-left transition-colors"
             >
               {post.attached_place.image ? (
@@ -1993,11 +2029,13 @@ function CommunityDetail({ id }: { id: string }) {
                 </span>
               )}
               <div className="min-w-0 flex-1">
-                <p className="text-ink truncate text-sm font-semibold">
+                <p aria-hidden="true" className="text-ink truncate text-sm font-semibold">
                   {post.attached_place.name}
                 </p>
                 <div className="mt-0.5 flex items-center gap-2">
-                  <p className="text-brand-600 text-xs">지도에서 보기</p>
+                  <p aria-hidden="true" className="text-brand-600 text-xs">
+                    지도에서 보기
+                  </p>
                   {post.rating != null && (
                     <span className="text-steel flex items-center gap-0.5 text-xs">
                       <Star className="h-3 w-3 fill-yellow-400 text-yellow-500" />
@@ -2012,15 +2050,23 @@ function CommunityDetail({ id }: { id: string }) {
           {post.attached_course && (
             <button
               onClick={() => router.push(`/course/${post.attached_course!.course_id}`)}
+              aria-label={`첨부된 코스, ${post.attached_course.course_nm}${
+                post.course_rating != null ? `, 별점 ${post.course_rating}점` : ""
+              }, 코스 상세보기`}
+              data-speak-group="true"
               className="border-navy-100 hover:border-navy-300 hover:bg-navy-50 bg-background flex w-full items-center gap-3 rounded-full border p-3.5 text-left transition-colors"
             >
               <div className="bg-navy-100 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
                 <Route className="text-navy-600 h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-ink text-sm font-semibold">{post.attached_course.course_nm}</p>
+                <p aria-hidden="true" className="text-ink text-sm font-semibold">
+                  {post.attached_course.course_nm}
+                </p>
                 <div className="mt-0.5 flex items-center gap-2">
-                  <p className="text-navy-600 text-xs">코스 상세보기</p>
+                  <p aria-hidden="true" className="text-navy-600 text-xs">
+                    코스 상세보기
+                  </p>
                   {post.course_rating != null && (
                     <span className="text-steel flex items-center gap-0.5 text-xs">
                       <Star className="h-3 w-3 fill-yellow-400 text-yellow-500" />
@@ -2165,12 +2211,22 @@ function CommunityDetail({ id }: { id: string }) {
 
           <div className="space-y-3">
             {commentsLoading && <p className="text-stone text-sm">불러오는 중…</p>}
-            {!commentsLoading && comments.length === 0 && (
+            {!commentsLoading && commentsError && (
+              <CommunityContentError message={commentsError} onRetry={() => void loadComments()} />
+            )}
+            {!commentsLoading && !commentsError && comments.length === 0 && (
               <p className="text-stone text-sm">첫 댓글을 남겨보세요.</p>
             )}
             {!commentsLoading &&
+              !commentsError &&
               comments.map((c) => (
-                <div key={c.id} className="bg-surface-soft rounded-lg p-4">
+                <div
+                  key={c.id}
+                  className="bg-surface-soft rounded-lg p-4"
+                  data-speak-group="true"
+                  tabIndex={0}
+                  aria-label={`작성자 ${c.author_nickname}, ${formatCommunityDateTimeForSpeech(c.created_at)} 작성, ${c.content}`}
+                >
                   <div className="mb-1.5 flex items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                       <CommunityLevelBadge
@@ -2238,7 +2294,9 @@ function CommunityDetail({ id }: { id: string }) {
                       </div>
                     </div>
                   ) : (
-                    <p className="text-slate text-sm">{c.content}</p>
+                    <p aria-hidden="true" className="text-slate text-sm">
+                      {c.content}
+                    </p>
                   )}
                 </div>
               ))}
@@ -2251,6 +2309,7 @@ function CommunityDetail({ id }: { id: string }) {
               onChange={(e) => setCommentInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCommentSubmit()}
               placeholder="댓글을 입력하세요"
+              aria-label="댓글을 입력하세요"
               className="focus:ring-brand-500 border-hairline bg-background text-ink min-h-11 flex-1 rounded-lg border px-4 py-3 text-sm focus:ring-2 focus:outline-none"
             />
             <Button

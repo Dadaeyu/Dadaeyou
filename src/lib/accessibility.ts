@@ -88,6 +88,16 @@ export function mergeAccessibilityPreferences(
   };
 }
 
+// 브라우저 음성엔진마다 숫자 "0"을 "영"/"공" 중 무엇으로 읽을지가 갈려서(같은 화면 안에서도
+// 문맥에 따라 다르게 읽히는 경우가 있음) 항상 "영"으로 통일해 읽도록 텍스트 단계에서 치환한다.
+// - 여러 자리 숫자 중간의 0(예: "10", "2026")은 숫자가 앞뒤에 붙어 있으니 건드리지 않는다.
+// - 소수점의 0(예: "0.0")도 건드리지 않는다 — 엔진이 "X.Y"를 이미 "엑스쩜와이"로 자연스럽게
+//   읽는데, "0"을 "영"으로 글자 치환해버리면 더 이상 숫자로 안 보여서 오히려 이상하게 읽힌다.
+// - 그 외 독립된 "0"(예: "즐겨찾기 0개")만 "영"으로 바꾼다.
+export function normalizeForSpeech(text: string): string {
+  return text.replace(/(?<![.\d])0(?![.\d])/g, "영");
+}
+
 export function getSpeakableText(element: Element): string | null {
   const labelledBy = element.getAttribute("aria-labelledby");
   if (labelledBy) {
@@ -107,7 +117,9 @@ export function getSpeakableText(element: Element): string | null {
     tag === "a" ||
     tag === "input" ||
     tag === "textarea" ||
-    tag === "select";
+    tag === "select" ||
+    // span/div처럼 원래 안 읽던 태그를 개별적으로 읽기 대상에 넣는 opt-in 표시.
+    element.hasAttribute("data-speakable");
 
   if (!interactive && tag !== "h1" && tag !== "h2" && tag !== "h3" && tag !== "p") {
     return null;

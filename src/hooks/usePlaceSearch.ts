@@ -402,8 +402,35 @@ export function usePlaceSearch({
   };
 }
 
-async function fetchLikedPlaces(signal?: AbortSignal): Promise<SearchPlace[]> {
-  const response = await fetch("/api/tourism/liked", { signal });
+async function fetchLikedPlaces(
+  signal?: AbortSignal,
+  filters?: {
+    guCode?: string;
+    dong?: string;
+    themes?: string[];
+    minRating?: number;
+    accessibility?: string[];
+    headcount?: number;
+    dateFrom?: string;
+    dateTo?: string;
+  }
+): Promise<SearchPlace[]> {
+  const params = new URLSearchParams();
+  if (filters?.guCode) params.set("gu", filters.guCode);
+  if (filters?.dong) params.set("dong", filters.dong);
+  if (filters?.themes && filters.themes.length > 0) params.set("themes", filters.themes.join(","));
+  if (filters?.minRating && filters.minRating > 0)
+    params.set("minRating", String(filters.minRating));
+  if (filters?.accessibility && filters.accessibility.length > 0) {
+    params.set("accessibility", filters.accessibility.join(","));
+  }
+  if (filters?.headcount && filters.headcount >= 1)
+    params.set("headcount", String(filters.headcount));
+  if (filters?.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters?.dateTo) params.set("dateTo", filters.dateTo);
+  const query = params.toString();
+
+  const response = await fetch(`/api/tourism/liked${query ? `?${query}` : ""}`, { signal });
   if (!response.ok) return [];
 
   const liked = await response.json();
@@ -453,6 +480,25 @@ async function fetchCombinedPlaces(
   signal: AbortSignal
 ) {
   const trimmedKeyword = keyword.trim();
+
+  // "즐겨찾기만 보기"는 일반 검색과 합치지 않는다 — 내 즐겨찾기 중 현재 필터(구/테마/접근성/
+  // 별점/인원/일정)에 맞는 것만 보여준다. 카카오 결과도 즐겨찾기가 될 수 없으니 제외한다.
+  // (예전엔 즐겨찾기 전체 + 필터링된 일반 검색 결과를 그냥 합쳐서, 필터와 무관한 즐겨찾기와
+  // 즐겨찾기하지 않은 장소가 함께 섞여 나왔다.)
+  if (favoritesOnly) {
+    const liked = await fetchLikedPlaces(signal, {
+      guCode,
+      dong,
+      themes,
+      minRating,
+      accessibility,
+      headcount,
+      dateFrom,
+      dateTo
+    });
+    return { places: liked, liked: null as SearchPlace[] | null, total: liked.length };
+  }
+
   const hasNormalQuery = Boolean(
     trimmedKeyword ||
     accessibility.length > 0 ||
@@ -465,7 +511,7 @@ async function fetchCombinedPlaces(
     dateTo
   );
 
-  if (!hasNormalQuery && !favoritesOnly) {
+  if (!hasNormalQuery) {
     return { places: [] as SearchPlace[], liked: null as SearchPlace[] | null, total: 0 };
   }
 
@@ -479,23 +525,20 @@ async function fetchCombinedPlaces(
   if (headcount >= 1) params.set("headcount", String(headcount));
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
-  if (hasNormalQuery) params.set("page", String(page));
+  params.set("page", String(page));
 
-  const [databaseResponse, kakaoResults, liked] = await Promise.all([
-    hasNormalQuery
-      ? fetch(`/api/search?${params}`, { signal }).then(async (response) => {
-          if (!response.ok) throw new Error("장소 검색에 실패했습니다.");
-          return response.json() as Promise<{
-            places: Omit<SearchPlace, "source">[];
-            total: number;
-          }>;
-        })
-      : Promise.resolve({ places: [], total: 0 }),
+  const [databaseResponse, kakaoResults] = await Promise.all([
+    fetch(`/api/search?${params}`, { signal }).then(async (response) => {
+      if (!response.ok) throw new Error("장소 검색에 실패했습니다.");
+      return response.json() as Promise<{
+        places: Omit<SearchPlace, "source">[];
+        total: number;
+      }>;
+    }),
     // 카카오 결과는 자체 페이징이 없어(항상 같은 상위 결과) 1페이지에서만 보여준다.
     trimmedKeyword && page === 0
       ? fetchKakaoPlaces(trimmedKeyword, gu || undefined, dong || undefined)
-      : Promise.resolve([]),
-    favoritesOnly ? fetchLikedPlaces(signal) : Promise.resolve(null)
+      : Promise.resolve([])
   ]);
 
   const databasePlaces: SearchPlace[] = (
@@ -503,21 +546,17 @@ async function fetchCombinedPlaces(
   ).map((place: Omit<SearchPlace, "source">) => ({ ...place, source: "db" as const }));
   const total = typeof databaseResponse.total === "number" ? databaseResponse.total : 0;
 
-  const mergedDatabasePlaces = Array.from(
-    new Map([...databasePlaces, ...(liked ?? [])].map((place) => [place.id, place])).values()
-  );
-
   const coordinateKey = (lat: number, lng: number) => `${lat.toFixed(3)}_${lng.toFixed(3)}`;
   const databaseCoordinates = new Set(
-    mergedDatabasePlaces.map((place) => coordinateKey(place.lat, place.lng))
+    databasePlaces.map((place) => coordinateKey(place.lat, place.lng))
   );
   const uniqueKakaoPlaces = kakaoResults.filter(
     (place) => !databaseCoordinates.has(coordinateKey(place.lat, place.lng))
   );
 
   return {
-    places: [...mergedDatabasePlaces, ...uniqueKakaoPlaces],
-    liked,
+    places: [...databasePlaces, ...uniqueKakaoPlaces],
+    liked: null as SearchPlace[] | null,
     total
   };
 }

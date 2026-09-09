@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
+import { useAccessibility } from "@/context/AccessibilityContext";
 
 const CATEGORY_ICON: Record<string, string> = {
   보행: "♿",
@@ -24,6 +25,7 @@ export default function AccessibilitySection({
   groups: { category: string; items: { label: string; text: string }[] }[];
 }) {
   const [openCategory, setOpenCategory] = useState<string | null>(null);
+  const { speak } = useAccessibility();
 
   return (
     <div>
@@ -36,11 +38,35 @@ export default function AccessibilitySection({
           const extraCount = Math.max(0, group.items.length - 3);
           const summary = group.items[0] ? stripHtml(group.items[0].text) : "";
 
+          const collapsedLabel = [
+            group.category,
+            summary,
+            tagItems.length > 0 ? tagItems.map((item) => item.label).join(", ") : null,
+            extraCount > 0 ? `외 ${extraCount}개` : null
+          ]
+            .filter(Boolean)
+            .join(", ");
+
           return (
             <div key={group.category} className="bg-brand-50 overflow-hidden rounded-xl">
-              {/* 헤더 */}
+              {/* 헤더 — 접힌 상태에선 카테고리·요약·태그를 한 번에 읽고, 펼치거나 접으면
+                  그 즉시(호버 없이도) 바뀐 내용을 다시 읽어준다. */}
               <button
-                onClick={() => setOpenCategory(isOpen ? null : group.category)}
+                onClick={() => {
+                  const next = isOpen ? null : group.category;
+                  setOpenCategory(next);
+                  if (next) {
+                    speak(
+                      `${group.category} 펼침, ${group.items
+                        .map((item) => `${item.label}, ${stripHtml(item.text)}`)
+                        .join(", ")}`
+                    );
+                  } else {
+                    speak(`${group.category} 접힘`);
+                  }
+                }}
+                aria-label={isOpen ? `${group.category}, 펼쳐짐` : collapsedLabel}
+                data-speak-group="true"
                 className="w-full p-3 text-left"
               >
                 <div className="mb-1.5 flex items-center justify-between">
@@ -92,7 +118,11 @@ export default function AccessibilitySection({
                           <span className="bg-brand-500 h-1.5 w-1.5 shrink-0 rounded-full" />
                           <span className="text-xs font-semibold text-gray-800">{item.label}</span>
                         </div>
-                        <p className="pl-3 text-xs leading-relaxed text-gray-600">
+                        <p
+                          className="pl-3 text-xs leading-relaxed text-gray-600"
+                          tabIndex={0}
+                          aria-label={`${item.label}: ${stripHtml(item.text)}`}
+                        >
                           {stripHtml(item.text)}
                         </p>
                       </div>

@@ -22,6 +22,10 @@ export interface SearchPlace {
   // tb_place.place_id (내부 PK) — DB 출처(source="db")일 때만 채워짐.
   // tb_course_detail.place_id 등 place_id 를 FK로 쓰는 곳은 반드시 이 값을 써야 한다(contentid 아님).
   placeId?: number;
+  // 로그인 사용자의 저장된 접근성 니즈/선호 테마와 매칭되어 추천된 경우에만 채워짐
+  // (지도 첫 화면의 "추천 장소" 목록 — /api/tourism/top-rated-places 가 로그인 시에만 계산).
+  matchedAccessibility?: boolean;
+  matchedTheme?: boolean;
 }
 
 export async function fetchKakaoPlaces(
