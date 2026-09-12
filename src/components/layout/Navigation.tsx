@@ -61,6 +61,7 @@ export function DesktopNav() {
           <Link
             key={path}
             href={path}
+            replace={path === "/"}
             aria-current={active ? "page" : undefined}
             className={cn(
               "relative flex min-h-12 min-w-12 shrink-0 items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs whitespace-nowrap transition-all lg:gap-2 lg:px-3.5 lg:text-sm",
@@ -116,6 +117,7 @@ export function MobileNav() {
             <Link
               key={path}
               href={path}
+              replace={path === "/"}
               aria-current={active ? "page" : undefined}
               className={mobileNavClass(active)}
             >

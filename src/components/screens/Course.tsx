@@ -12,7 +12,8 @@ import {
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import KakaoMap, { type MapMarker, type MapPathSegment } from "@/components/KakaoMap";
+import dynamic from "next/dynamic";
+import type { MapMarker, MapPathSegment } from "@/components/KakaoMap";
 import { useAuth } from "@/context/AuthContext";
 import {
   Plus,
@@ -39,9 +40,8 @@ import {
   ZoomIn
 } from "lucide-react";
 import { Filters, DEFAULT_FILTERS, FilterFields, useFilters } from "@/components/PlaceFilters";
-import PlaceSearchSidebar from "@/components/search/PlaceSearchSidebar";
-import TourismDetailPanel from "@/components/search/TourismDetailPanel";
 import type { SearchPlace } from "@/lib/search/kakaoSearch";
+import { buildPlaceRouteMapHref } from "@/lib/search/mapRouteHref";
 import { usePlaceSearch, type TourismDetail } from "@/hooks/usePlaceSearch";
 import {
   getCategoryColor,
@@ -95,6 +95,10 @@ const DAY_LINE_COLORS = [
 ];
 
 // 1시간 뒤 시각(0~23, 자정 넘어가면 랩어라운드). 새 장소의 기본 종료시각 계산용.
+const KakaoMap = dynamic(() => import("@/components/KakaoMap"), { ssr: false });
+const PlaceSearchSidebar = dynamic(() => import("@/components/search/PlaceSearchSidebar"));
+const TourismDetailPanel = dynamic(() => import("@/components/search/TourismDetailPanel"));
+
 function addOneHour(hour: number): number {
   return (((hour + 1) % 24) + 24) % 24;
 }
@@ -2946,7 +2950,7 @@ function CourseDetail({ id }: { id: string }) {
             onBack={() => setPlaceSearchOpen(false)}
           />
         ) : selectedSearchPlace ? (
-          /* ── 지도 노드 클릭(장소 검색으로 추가된 항목) 상세 — 뒤로가기 시 코스 편집 패널로 바로 복귀 ── */
+          /* ── 코스 장소 상세(목록·마커). 보기 모드 경로안내는 지도에서 연다. 편집 중에는 끄고, 뒤로가면 코스 패널. ── */
           <TourismDetailPanel
             sp={
               {
@@ -2963,6 +2967,18 @@ function CourseDetail({ id }: { id: string }) {
             detail={selectedSearchDetail}
             isLoading={selectedSearchDetailLoading}
             onBack={() => setSelectedSearchPlace(null)}
+            onBeginRoute={
+              !isEditing && selectedSearchPlace.contentId
+                ? () =>
+                    router.push(
+                      buildPlaceRouteMapHref({
+                        contentId: selectedSearchPlace.contentId ?? "",
+                        name: selectedSearchPlace.name,
+                        from: `/course/${id}`
+                      })
+                    )
+                : undefined
+            }
           />
         ) : isEditing ? (
           /* ── 편집 패널 ── */

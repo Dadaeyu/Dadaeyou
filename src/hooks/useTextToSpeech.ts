@@ -19,6 +19,7 @@ const EMPTY_CAPABILITIES: TextToSpeechCapabilities = {
 
 export function useTextToSpeech() {
   const [capabilities, setCapabilities] = useState<TextToSpeechCapabilities>(EMPTY_CAPABILITIES);
+  const [status, setStatus] = useState<"idle" | "loading" | "playing">("idle");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef("");
   const isUnlockedRef = useRef(false);
@@ -74,6 +75,7 @@ export function useTextToSpeech() {
   }, [getAudio]);
 
   const stop = useCallback(() => {
+    setStatus("idle");
     playbackIdRef.current += 1;
     requestControllerRef.current?.abort();
     requestControllerRef.current = null;
@@ -121,6 +123,7 @@ export function useTextToSpeech() {
     async ({ text, voice, onEnd, onError }: SpeakOptions) => {
       stop();
 
+      setStatus("loading");
       const playbackId = playbackIdRef.current;
       const controller = new AbortController();
       requestControllerRef.current = controller;
@@ -157,6 +160,7 @@ export function useTextToSpeech() {
 
         const finish = (callback?: () => void) => {
           if (playbackIdRef.current !== playbackId) return;
+          setStatus("idle");
           releaseAudioSource();
           callback?.();
         };
@@ -166,9 +170,12 @@ export function useTextToSpeech() {
           finish(() => onError?.(new Error("생성된 음성을 재생하지 못했습니다.")));
 
         await audio.play();
+        if (!controller.signal.aborted && playbackIdRef.current === playbackId)
+          setStatus("playing");
       } catch (error) {
         if (controller.signal.aborted || playbackIdRef.current !== playbackId) return;
 
+        setStatus("idle");
         releaseAudioSource();
         onError?.(error instanceof Error ? error : new Error("음성 재생에 실패했습니다."));
       } finally {
@@ -181,6 +188,7 @@ export function useTextToSpeech() {
   );
 
   return {
+    status,
     defaultVoice: capabilities.defaultVoice,
     isAvailable: capabilities.available,
     provider: capabilities.provider,

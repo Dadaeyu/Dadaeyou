@@ -137,42 +137,6 @@ export function HomeNeedsPicker({
     });
   };
 
-  if (auth.loading) {
-    return (
-      <section
-        id="home-needs"
-        className="scroll-mt-24 p-3 sm:p-5"
-        aria-labelledby="needs-title"
-        aria-busy="true"
-      >
-        <p className="text-brand-800 text-xs font-semibold">장소 고르는 조건</p>
-        <h2 id="needs-title" className="text-ink mt-0.5 text-lg font-semibold sm:text-xl">
-          필요한 도움을 준비하고 있어요
-        </h2>
-        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(23rem,0.9fr)]">
-          <div className="space-y-2" aria-hidden="true">
-            <div className="bg-surface h-4 w-20 animate-pulse rounded motion-reduce:animate-none" />
-            <div className="flex gap-2">
-              {[0, 1, 2].map((item) => (
-                <div
-                  key={item}
-                  className="bg-surface h-11 w-28 animate-pulse rounded-full motion-reduce:animate-none"
-                />
-              ))}
-            </div>
-          </div>
-          <div className="space-y-2" aria-hidden="true">
-            <div className="bg-surface h-4 w-24 animate-pulse rounded motion-reduce:animate-none" />
-            <div className="bg-surface h-12 w-full animate-pulse rounded-xl motion-reduce:animate-none" />
-          </div>
-        </div>
-        <span className="sr-only" role="status">
-          필요한 도움을 준비하는 중입니다.
-        </span>
-      </section>
-    );
-  }
-
   return (
     <section
       id="home-needs"
@@ -180,6 +144,11 @@ export function HomeNeedsPicker({
       aria-labelledby="needs-title"
       aria-busy={auth.loading}
     >
+      {auth.loading ? (
+        <span className="sr-only" role="status">
+          저장된 도움 선택을 확인하고 있어요.
+        </span>
+      ) : null}
       <div className={`flex items-start justify-between gap-3 ${easyMode ? "flex-col" : ""}`}>
         <div className="min-w-0">
           <p className="text-brand-800 flex items-center gap-2 text-xs font-semibold sm:text-sm">
@@ -204,19 +173,19 @@ export function HomeNeedsPicker({
           </p>
         </div>
 
-        {recommendationNeedIds.length ? (
-          <button
-            type="button"
-            onClick={experience.clearNeeds}
-            className={`text-steel hover:text-brand-800 min-h-11 shrink-0 px-2 text-xs font-semibold transition-colors sm:text-sm ${
-              easyMode
-                ? "border-hairline text-brand-800 w-full rounded-xl border bg-white text-center"
-                : ""
-            }`}
-          >
-            선택 초기화
-          </button>
-        ) : null}
+        <button
+          type="button"
+          onClick={experience.clearNeeds}
+          disabled={auth.loading || !recommendationNeedIds.length}
+          aria-hidden={!recommendationNeedIds.length}
+          className={`text-steel hover:text-brand-800 min-h-11 shrink-0 px-2 text-xs font-semibold transition-colors sm:text-sm ${!recommendationNeedIds.length ? "invisible" : ""} ${
+            easyMode
+              ? "border-hairline text-brand-800 w-full rounded-xl border bg-white text-center"
+              : ""
+          }`}
+        >
+          선택 초기화
+        </button>
       </div>
 
       <fieldset className="mt-5 min-w-0">

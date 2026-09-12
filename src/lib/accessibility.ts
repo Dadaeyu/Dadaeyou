@@ -108,7 +108,7 @@ const CONTENT_BLOCK_SELECTOR = [
  * 가장 가까운 내용 블록을 찾아 읽는다(클릭과 같은 기준) — 카드가 통째로 링크인 목록 화면만
  * 호버로 읽히고 상세 화면 본문은 안 읽히던 문제를 없애기 위해서다. */
 export const HOVER_SPEAK_SELECTOR =
-  "button, a, [role='button'], [role='link'], input, textarea, select";
+  "button, a, [role='button'], [role='link'], input, textarea, select, summary";
 
 function normalizeSpeakText(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
@@ -126,8 +126,7 @@ export function shouldStopHoverSpeech(relatedTarget: EventTarget | null): boolea
 
   const el = resolveSpeechTarget(relatedTarget as Element);
   if (isA11yChrome(el)) return true;
-  if (el.closest(HOVER_SPEAK_SELECTOR)) return false;
-  if (findSpeakableBlock(el)) return false;
+  if (findHoverSpeakableBlock(el)) return false;
   return true;
 }
 
@@ -145,7 +144,12 @@ function speakLimitFor(element: Element): number {
 }
 
 export function isA11yChrome(element: Element): boolean {
-  return Boolean(element.closest(CHROME_SELECTOR));
+  const chrome = element.closest(CHROME_SELECTOR);
+  if (!chrome) return false;
+  // 상세 창 안의 탭과 하단 동작은 본문 기능이다.
+  const dialog = element.closest("dialog, [role='dialog']");
+  if (dialog?.contains(chrome) && chrome.matches("header, nav, footer")) return false;
+  return true;
 }
 
 /**
@@ -157,10 +161,40 @@ export function isA11yChrome(element: Element): boolean {
  */
 export function resolveSpeechTarget(target: Element): Element {
   let current = target;
-  while (current.getAttribute("aria-hidden") === "true" && current.parentElement) {
-    current = current.parentElement;
+  let hidden = current.closest("[aria-hidden='true']");
+  while (hidden?.parentElement) {
+    current = hidden.parentElement;
+    hidden = current.closest("[aria-hidden='true']");
   }
   return current;
+}
+
+/** 커서 아래 컨트롤/명시적 행을 우선하고, 일반 텍스트는 해당 조각만 읽는다. */
+export function findHoverSpeakableBlock(raw: Element): Element | null {
+  const target = resolveSpeechTarget(raw);
+  if (isA11yChrome(target) || target.closest("[hidden], [inert]")) return null;
+  const control = target.closest(HOVER_SPEAK_SELECTOR);
+  if (control) return control;
+  const explicit = target.closest("[data-speakable]");
+  if (explicit) return explicit;
+  const row = target.closest("dt, dd");
+  if (row) return findSpeakableBlock(row);
+
+  // div/span만으로 만든 날씨·상세 정보도 포함하되, 빈 레이아웃에서
+  // 상위 섹션 전체를 읽지 않는다. SVG는 텍스트가 있는 부모를 찾는다.
+  let current: Element | null = target;
+  while (current && !current.matches("main, body, html")) {
+    if (
+      Array.from(current.childNodes ?? []).some(
+        (node) => node.nodeType === 3 && normalizeSpeakText(node.textContent)
+      ) ||
+      current.hasAttribute("aria-label")
+    )
+      return current;
+    if (!current.matches("svg, path, g, circle, rect, use")) break;
+    current = current.parentElement;
+  }
+  return null;
 }
 
 /** 눌러서 읽을 가장 가까운 내용 블록. main/body처럼 너무 큰 컨테이너는 고르지 않는다. */
@@ -362,7 +396,8 @@ export function getSpeakableText(element: Element): string | null {
     tag === "a" ||
     tag === "input" ||
     tag === "textarea" ||
-    tag === "select";
+    tag === "select" ||
+    tag === "summary";
 
   if (ariaLabel && isCompactControl) return ariaLabel;
 
@@ -396,6 +431,13 @@ export function getSpeakableText(element: Element): string | null {
     tag !== "h1" &&
     tag !== "h2" &&
     tag !== "h3" &&
+    tag !== "h4" &&
+    tag !== "h5" &&
+    tag !== "h6" &&
+    tag !== "span" &&
+    tag !== "label" &&
+    tag !== "strong" &&
+    tag !== "small" &&
     tag !== "p"
   ) {
     return null;

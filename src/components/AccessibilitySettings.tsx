@@ -2,12 +2,14 @@
 
 import { BookOpenCheck } from "lucide-react";
 import { useAccessibility, FONT_SCALE_MIN, FONT_SCALE_MAX } from "@/context/AccessibilityContext";
+import { useOptionalAuth } from "@/context/AuthContext";
+import AccessibilityAccountSaveHint from "@/components/AccessibilityAccountSaveHint";
 
 const settingsConfig = [
   {
     key: "readAloud" as const,
     label: "음성 읽어주기",
-    description: "화면의 글·카드를 누르면 그 내용을 읽습니다",
+    description: "글·카드에 마우스를 올리거나 누르면 읽습니다",
     toggle: "toggleReadAloud" as const
   },
   {
@@ -42,8 +44,12 @@ export default function AccessibilitySettings({ onClose }: Props) {
     increaseFontScale,
     decreaseFontScale,
     speakNext,
-    canSpeakNext
+    canSpeakNext,
+    accountSaveStatus,
+    retryAccountSave
   } = useAccessibility();
+  const auth = useOptionalAuth();
+  const loggedIn = Boolean(auth?.user);
 
   const values = { readAloud, highContrast, darkMode };
   const toggles = {
@@ -63,6 +69,14 @@ export default function AccessibilitySettings({ onClose }: Props) {
         className="border-hairline absolute top-full right-4 z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-xl border bg-white p-3 shadow-lg"
       >
         <p className="text-stone mb-2 px-1 text-xs font-semibold">접근성 설정</p>
+        {loggedIn ? (
+          <AccessibilityAccountSaveHint
+            status={accountSaveStatus}
+            loggedIn
+            saving={accountSaveStatus === "saving"}
+            onRetry={retryAccountSave}
+          />
+        ) : null}
         <div className="space-y-1">
           {settingsConfig.map(({ key, label, description, toggle }) => (
             <button

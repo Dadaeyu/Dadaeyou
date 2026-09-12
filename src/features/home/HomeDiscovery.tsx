@@ -61,7 +61,7 @@ export function HomeDiscovery({ festivals, easyMode, onOpenFestival }: HomeDisco
           favoritePlaces?: Partial<HomeDiscoveryHotPlace>[];
         }>("/api/tourism/top-rated-places", controller.signal),
         fetchJson<{ items?: Partial<HomeDiscoveryCourse>[] }>(
-          "/api/courses/shared?limit=50&sort=rating_desc",
+          "/api/home/courses",
           controller.signal
         )
       ]);
@@ -134,7 +134,7 @@ export function HomeDiscovery({ festivals, easyMode, onOpenFestival }: HomeDisco
         </h2>
         {!easyMode ? (
           <p className="text-fixed-white/75 mt-2 max-w-[48rem] text-sm leading-6 break-keep">
-            위의 맞춤 추천과는 별개로, 사람들이 남긴 반응과 가까운 축제 소식을 모았어요.
+            위의 맞춤 추천과는 별개로, 사람들이 남긴 반응과 다가오는 축제 소식을 모았어요.
           </p>
         ) : null}
       </header>

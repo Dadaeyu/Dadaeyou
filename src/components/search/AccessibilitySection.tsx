@@ -36,11 +36,23 @@ export default function AccessibilitySection({
           const extraCount = Math.max(0, group.items.length - 3);
           const summary = group.items[0] ? stripHtml(group.items[0].text) : "";
 
+          const collapsedLabel = [
+            group.category,
+            summary,
+            tagItems.length > 0 ? tagItems.map((item) => item.label).join(", ") : null,
+            extraCount > 0 ? `외 ${extraCount}개` : null
+          ]
+            .filter(Boolean)
+            .join(", ");
+
           return (
             <div key={group.category} className="bg-brand-50 overflow-hidden rounded-xl">
-              {/* 헤더 */}
+              {/* 헤더 — 접힌 상태에선 카테고리·요약·태그를 한 번에 읽는다. 펼치면 아래
+                  항목들이 각자 aria-label(라벨: 내용)로 hover에 걸린다. */}
               <button
                 onClick={() => setOpenCategory(isOpen ? null : group.category)}
+                aria-label={isOpen ? `${group.category}, 펼쳐짐` : collapsedLabel}
+                data-speakable="true"
                 className="w-full p-3 text-left"
               >
                 <div className="mb-1.5 flex items-center justify-between">
@@ -87,12 +99,16 @@ export default function AccessibilitySection({
                 <div className="min-h-0 overflow-hidden">
                   <div className="border-brand-100 space-y-3 border-t px-3 pt-3 pb-3">
                     {group.items.map((item) => (
-                      <div key={item.label}>
+                      <div key={item.label} data-speakable>
                         <div className="mb-0.5 flex items-center gap-1.5">
                           <span className="bg-brand-500 h-1.5 w-1.5 shrink-0 rounded-full" />
                           <span className="text-xs font-semibold text-gray-800">{item.label}</span>
                         </div>
-                        <p className="pl-3 text-xs leading-relaxed text-gray-600">
+                        <p
+                          className="pl-3 text-xs leading-relaxed text-gray-600"
+                          tabIndex={0}
+                          aria-label={`${item.label}: ${stripHtml(item.text)}`}
+                        >
                           {stripHtml(item.text)}
                         </p>
                       </div>

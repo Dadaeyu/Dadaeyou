@@ -2,11 +2,13 @@
 
 // 장소 필터(접근성/인원수/테마/위치/일정/별점/즐겨찾기) 상태 훅과 필터 UI 필드 모음.
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { Plus, Minus, Star, Heart } from "lucide-react";
 import { useFilterOptions } from "@/lib/filterOptions";
 import { resolveEndAfterStartChange } from "@/lib/date-range";
 import { Select } from "@/components/ui/Select";
 import { DateField } from "@/components/ui/DateField";
+import { useAuth } from "@/context/AuthContext";
 
 export const AGE_GROUPS = ["영유아", "어린이", "청소년", "성인", "고령자"];
 
@@ -87,6 +89,8 @@ export function FilterFields({
 }) {
   // 접근성 · 테마 옵션은 전역 캐시에서 가져온다 (브라우저 첫 진입 시 1회 조회).
   const { accessibility: accessOptions, themes: themeOptions } = useFilterOptions();
+  const { user } = useAuth();
+  const [favoritesLoginNotice, setFavoritesLoginNotice] = useState(false);
 
   const xs = compact ? "text-xs" : "text-sm";
   const chip = (active: boolean) =>
@@ -142,6 +146,7 @@ export function FilterFields({
           <p className={`${xs} text-steel mb-1.5 font-semibold`}>인원수</p>
           <div className="border-hairline flex h-10 w-fit items-center gap-1 rounded-lg border px-1.5">
             <button
+              aria-label="인원수 줄이기"
               onClick={() => set("headcount", Math.max(1, filters.headcount - 1))}
               className="hover:bg-surface rounded p-0.5"
             >
@@ -150,6 +155,7 @@ export function FilterFields({
             <input
               type="number"
               min={1}
+              aria-label={`인원수 ${filters.headcount}명`}
               value={filters.headcount}
               onChange={(e) => {
                 const n = Math.floor(Number(e.target.value));
@@ -159,6 +165,7 @@ export function FilterFields({
             />
             <span className={`${xs} text-steel`}>명</span>
             <button
+              aria-label="인원수 늘리기"
               onClick={() => set("headcount", filters.headcount + 1)}
               className="hover:bg-surface rounded p-0.5"
             >
@@ -237,7 +244,11 @@ export function FilterFields({
             <p className={`${xs} text-steel mb-1.5 font-semibold`}>별점</p>
             <div className="flex h-10 items-center gap-0.5">
               {[1, 2, 3, 4, 5].map((s) => (
-                <button key={s} onClick={() => set("minRating", filters.minRating === s ? 0 : s)}>
+                <button
+                  key={s}
+                  aria-label={`별점 ${s}점 이상`}
+                  onClick={() => set("minRating", filters.minRating === s ? 0 : s)}
+                >
                   <Star
                     className={`h-5 w-5 transition-colors ${s <= filters.minRating ? "fill-yellow-400 text-yellow-500" : "text-hairline"}`}
                   />
@@ -255,7 +266,16 @@ export function FilterFields({
           <div>
             <p className={`${xs} text-steel mb-1.5 font-semibold`}>즐겨찾기</p>
             <button
-              onClick={() => set("favoritesOnly", !filters.favoritesOnly)}
+              onClick={() => {
+                if (!user) {
+                  // 비로그인은 즐겨찾기가 있을 수 없으니 필터를 켜지 않는다(지도는 그대로,
+                  // 버튼도 활성화 표시되지 않음) — 안내만 보여준다.
+                  setFavoritesLoginNotice(true);
+                  setTimeout(() => setFavoritesLoginNotice(false), 2000);
+                  return;
+                }
+                set("favoritesOnly", !filters.favoritesOnly);
+              }}
               className={`flex h-10 items-center gap-1 rounded-full border px-2 text-xs transition-colors ${
                 filters.favoritesOnly
                   ? "border-red-400 bg-red-50 text-red-600"
@@ -267,6 +287,13 @@ export function FilterFields({
               />
               즐겨찾기
             </button>
+            {favoritesLoginNotice &&
+              createPortal(
+                <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full bg-gray-900 px-4 py-2.5 text-xs whitespace-nowrap text-white shadow-lg">
+                  로그인 후 이용 가능합니다
+                </div>,
+                document.body
+              )}
           </div>
         )}
       </div>

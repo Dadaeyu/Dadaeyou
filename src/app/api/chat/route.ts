@@ -44,6 +44,7 @@ import {
   type ExplicitChatTheme
 } from "@/lib/chat/topicRelevance";
 import { getBakeryChatKnowledgeRows } from "@/lib/theme/bakeryTheme";
+import { type ServerTiming, withServerTiming } from "@/lib/performance/serverTiming";
 
 type Confidence = "high" | "medium" | "low";
 
@@ -2989,6 +2990,10 @@ function getRowTags(row: KnowledgeRow) {
 }
 
 export async function POST(request: Request) {
+  return withServerTiming((timing) => handlePost(request, timing));
+}
+
+async function handlePost(request: Request, timing: ServerTiming) {
   try {
     if (
       !isAllowedChatOrigin({
@@ -3062,14 +3067,16 @@ export async function POST(request: Request) {
       );
     }
 
-    await reserveChatUsage(clientKey);
+    await timing.measure("usage", () => reserveChatUsage(clientKey));
 
-    const classifiedAnalysis = await classifyQuestion({
-      apiKey,
-      history,
-      message,
-      model
-    });
+    const classifiedAnalysis = await timing.measure("classify", () =>
+      classifyQuestion({
+        apiKey,
+        history,
+        message,
+        model
+      })
+    );
     if (!classifiedAnalysis) {
       return jsonChatResponse(
         createUnavailableResponse(
@@ -3121,13 +3128,15 @@ export async function POST(request: Request) {
       (!conversationContext.isFollowUp || conversationContext.wantsDifferentPlaces)
         ? conversationContext.seenPlaceTitles
         : [];
-    const [knowledge, weather] = await Promise.all([
-      fetchKnowledge(analysis, seenPlaceTitles),
-      fetchTourWeather({
-        location: analysis.location,
-        weatherSensitive: analysis.weather_sensitive
-      })
-    ]);
+    const [knowledge, weather] = await timing.measure("retrieval", () =>
+      Promise.all([
+        fetchKnowledge(analysis, seenPlaceTitles),
+        fetchTourWeather({
+          location: analysis.location,
+          weatherSensitive: analysis.weather_sensitive
+        })
+      ])
+    );
 
     if (knowledge.status !== "ready") {
       return jsonChatResponse(
@@ -3141,44 +3150,53 @@ export async function POST(request: Request) {
       );
     }
 
-    const deepSeekResponse = await fetchWithTimeout(DEEPSEEK_CHAT_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "system", content: formatKnowledgeContext(knowledge, weather) },
-          ...(profileAccessibilityNeeds.length
-            ? [
-                {
-                  role: "system",
-                  content: `사용자가 저장한 접근성 조건: ${profileAccessibilityNeeds.join(", ")}. 질문과 관련 있을 때만 근거 자료 안에서 반영한다.`
-                }
-              ]
-            : []),
-          ...(conversationContext.isFollowUp
-            ? [
-                {
-                  role: "system",
-                  content: `현재 질문은 최근 대화의 후속 질문이다. 직전 추천 후보는 ${conversationContext.previousPlaceTitles.join(", ")}이며, 이 후보 안에서 사용자의 질문을 이어서 답한다.`
-                }
-              ]
-            : []),
-          ...createChatCompletionHistory(history),
-          { role: "user", content: message }
-        ],
-        thinking: { type: "disabled" },
-        max_tokens: 850,
-        temperature: 0.3,
-        stream: false
-      })
+    const generationResult = await timing.measure("generation", async () => {
+      const response = await fetchWithTimeout(DEEPSEEK_CHAT_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "system", content: formatKnowledgeContext(knowledge, weather) },
+            ...(profileAccessibilityNeeds.length
+              ? [
+                  {
+                    role: "system",
+                    content: `사용자가 저장한 접근성 조건: ${profileAccessibilityNeeds.join(", ")}. 질문과 관련 있을 때만 근거 자료 안에서 반영한다.`
+                  }
+                ]
+              : []),
+            ...(conversationContext.isFollowUp
+              ? [
+                  {
+                    role: "system",
+                    content: `현재 질문은 최근 대화의 후속 질문이다. 직전 추천 후보는 ${conversationContext.previousPlaceTitles.join(", ")}이며, 이 후보 안에서 사용자의 질문을 이어서 답한다.`
+                  }
+                ]
+              : []),
+            ...createChatCompletionHistory(history),
+            { role: "user", content: message }
+          ],
+          thinking: { type: "disabled" },
+          max_tokens: 850,
+          temperature: 0.3,
+          stream: false
+        })
+      });
+
+      if (!response.ok) return { ok: false as const };
+
+      return {
+        data: (await response.json()) as DeepSeekChatResponse,
+        ok: true as const
+      };
     });
 
-    if (!deepSeekResponse.ok) {
+    if (!generationResult.ok) {
       return jsonChatResponse(
         createUnavailableResponse(
           "현재 답변 생성 서비스와 연결이 원활하지 않아요. 잠시 뒤 다시 질문해 주세요."
@@ -3187,7 +3205,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const data = (await deepSeekResponse.json()) as DeepSeekChatResponse;
+    const data = generationResult.data;
     const answer = normalizeDaiyuTone(data.choices?.[0]?.message?.content?.trim() || "");
 
     if (!answer) {

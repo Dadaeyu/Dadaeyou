@@ -10,6 +10,7 @@ import {
   isTextToSpeechBodySizeAllowed,
   TTS_MAX_BODY_BYTES
 } from "@/lib/tts/server/request-body";
+import { withServerTiming } from "@/lib/performance/serverTiming";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -51,6 +52,10 @@ export function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  return withServerTiming(() => handlePost(request));
+}
+
+async function handlePost(request: Request) {
   if (!isAllowedTextToSpeechOrigin(request)) {
     return Response.json({ message: "허용되지 않은 요청이에요." }, { status: 403 });
   }

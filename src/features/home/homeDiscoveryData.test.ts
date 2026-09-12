@@ -150,7 +150,6 @@ test("행사는 받은 순서를 유지하면서 최대 3개만 쓴다", () => {
         officialUrl: null,
         reservationUrl: null,
         accessibility: [],
-        distanceMeters: null,
         matchedNeedIds: []
       }) satisfies RankedHomePlace
   );

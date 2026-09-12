@@ -32,7 +32,7 @@ test("자동 읽기 버튼은 사용자 동작에서 TTS를 먼저 unlock 한다
 test("질문 전송은 기존 음성을 정리한 뒤 TTS 재생 권한을 연다", () => {
   assert.match(
     source,
-    /async function sendMessage[\s\S]*abortVoiceInput\(\);\s*stopSpeech\(\);\s*const ttsUnlockPromise[\s\S]*unlockTts\(\)[\s\S]*await ttsUnlockPromise/u
+    /async function sendMessage[\s\S]*abortVoiceInput\(\);\s*stopSpeech\(\);\s*const ttsUnlockPromise[\s\S]*unlockTts\(\)[\s\S]*const ttsUnlocked = await ttsUnlockPromise/u
   );
 });
 
@@ -42,4 +42,32 @@ test("전역 읽어주기가 켜져 있으면 타이핑으로 보낸 질문도 �
     /const shouldReadTypedQuestion = readAloud && !options\.continueConversation/u
   );
   assert.match(source, /shouldReadTypedQuestion[\s\S]*startSpeech\(userMessageId, text\)/u);
+});
+
+test("타이핑 질문 읽기는 빠른 답변 완료 뒤에도 취소되지 않는다", () => {
+  assert.match(source, /const speechRequestIdRef = useRef\(0\)/u);
+  assert.match(source, /const speechRequestId = speechRequestIdRef\.current \+ 1/u);
+  assert.match(source, /speechRequestIdRef\.current !== speechRequestId/u);
+  assert.doesNotMatch(
+    source,
+    /const ttsUnlocked = await ttsUnlockPromise;\s*if \(activeRequestRef\.current !== controller/u
+  );
+});
+
+test("관련 코스 조회는 답변 말풍선을 먼저 추가한 뒤 별도로 붙인다", () => {
+  assert.match(
+    source,
+    /setMessages\(\(current\) => \[\s*\.\.\.current,\s*\{ id: assistantMessageId, role: "assistant", content: data \}\s*\]\);\s*void loadRelatedCourses\(assistantMessageId, data, text\);/u
+  );
+  assert.match(
+    source,
+    /message\.id === messageId[\s\S]*content: \{ \.\.\.message\.content, courses \}/u
+  );
+});
+
+test("응답 지연은 취소와 같은 질문 다시 시도를 제공한다", () => {
+  assert.match(source, /function cancelRequest\(\)[\s\S]*controller\.abort\(\)/u);
+  assert.match(source, /답변 요청을 취소했어요/u);
+  assert.match(source, /같은 질문 다시 시도/u);
+  assert.match(source, /onClick=\{\(\) => void sendMessage\(retryQuestion\)\}/u);
 });

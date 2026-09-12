@@ -38,6 +38,7 @@ export default function Header() {
         {/* 브랜드 로고 — 마크(위치핀+하트) + 워드마크 */}
         <Link
           href="/"
+          replace
           className="group flex min-h-12 shrink-0 items-center gap-2.5"
           aria-label="다대유 - 대전 무장애 여행 홈"
         >

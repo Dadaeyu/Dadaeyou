@@ -24,7 +24,6 @@ import {
 } from "lucide-react";
 import { HomePlaceImage } from "@/features/home/HomePlaceImage";
 import {
-  formatDistance,
   formatSourceDate,
   getAccessibilityGroups,
   getConfirmedHomeEvidenceForNeeds,
@@ -82,7 +81,6 @@ export function HomePlaceDialog({
     [place, selectedNeedIds]
   );
   const sourceDate = formatSourceDate(place.sourceUpdatedAt);
-  const distance = formatDistance(place.distanceMeters);
   const decisionChecks = needChecks;
   const usesSelectedNeedSummary = decisionChecks.length > 0;
   const confirmedSummaryEvidence = getConfirmedHomeEvidenceForNeeds(place, selectedNeedIds);
@@ -204,9 +202,6 @@ export function HomePlaceDialog({
               ) : (
                 <p className="text-steel mt-4">주소는 방문 전에 운영처에서 확인해 주세요.</p>
               )}
-              {distance ? (
-                <p className="text-steel mt-3 text-sm">내 위치에서 직선거리 {distance}</p>
-              ) : null}
 
               {!usesSelectedNeedSummary && summaryEvidence.length ? (
                 <dl
@@ -261,17 +256,7 @@ export function HomePlaceDialog({
 
                 <div className="border-hairline mt-5 divide-y overflow-hidden rounded-2xl border bg-white">
                   {decisionChecks.map((check) => (
-                    <NeedCheckRow
-                      key={check.id}
-                      check={check}
-                      detail={
-                        check.id === "location-distance"
-                          ? distance
-                            ? `직선거리 ${distance}입니다. 실제 이동 경로 거리는 지도에서 다시 확인해 주세요.`
-                            : "내 위치를 사용하지 않아 거리를 계산하지 못했습니다."
-                          : undefined
-                      }
-                    />
+                    <NeedCheckRow key={check.id} check={check} />
                   ))}
                 </div>
               </section>
@@ -447,16 +432,10 @@ export function HomePlaceDialog({
   );
 }
 
-function NeedCheckRow({
-  check,
-  detail
-}: {
-  check: ReturnType<typeof getNeedEvidenceChecks>[number];
-  detail?: string;
-}) {
+function NeedCheckRow({ check }: { check: ReturnType<typeof getNeedEvidenceChecks>[number] }) {
   const statusText =
     check.status === "unavailable" ? "제한 안내" : check.status === "unknown" ? "문의 권장" : null;
-  const evidenceText = formatHomeDetailValue(detail ?? check.evidence[0]?.value, check.label);
+  const evidenceText = formatHomeDetailValue(check.evidence[0]?.value, check.label);
 
   return (
     <div className="grid min-h-16 grid-cols-[1.5rem_minmax(0,1fr)] gap-3 p-4">

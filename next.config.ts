@@ -1,12 +1,33 @@
 import type { NextConfig } from "next";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  HOME_IMAGE_MAX_BYTES,
+  HOME_IMAGE_QUALITY,
+  HOME_IMAGE_REMOTE_HOST
+} from "./src/features/home/homeImage";
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   turbopack: {
     root: appRoot
+  },
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: HOME_IMAGE_REMOTE_HOST,
+        port: "",
+        pathname: "/**"
+      }
+    ],
+    qualities: [HOME_IMAGE_QUALITY, 75],
+    minimumCacheTTL: 86_400,
+    maximumRedirects: 0,
+    maximumResponseBody: HOME_IMAGE_MAX_BYTES,
+    dangerouslyAllowLocalIP: false,
+    dangerouslyAllowSVG: false
   },
   async headers() {
     return [

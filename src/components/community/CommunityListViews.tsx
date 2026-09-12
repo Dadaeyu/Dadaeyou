@@ -4,7 +4,12 @@ import Link from "next/link";
 import { Calendar, ChevronDown, Eye, Heart, HelpCircle, MessageCircle, Pin } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { CommunityLevelBadge } from "@/components/community/CommunityLevelBadge";
-import { formatCommunityDate, formatCommunityDateTime } from "@/lib/community/format";
+import {
+  formatCommunityDate,
+  formatCommunityDateTime,
+  formatCommunityDateTimeForSpeech
+} from "@/lib/community/format";
+import { formatCommunityLevelForSpeech } from "@/lib/community/levels";
 
 export type BoardListItem = {
   id: number;
@@ -81,6 +86,8 @@ export function CommunityBoardList({
         <Link
           key={post.id}
           href={`/community/${post.id}`}
+          aria-label={`${post.notice_yn ? "공지" : post.board_nm} 게시글, ${post.title}, ${formatCommunityLevelForSpeech(post.writer_community_level)}, 작성자 ${post.writer_nm}, ${formatCommunityDateTimeForSpeech(post.created_at)} 작성, 조회 ${post.view_cnt}회, 즐겨찾기 ${post.like_cnt === 0 ? "영" : post.like_cnt}개, 댓글 ${post.comment_cnt}개`}
+          data-speakable="true"
           className={`hover:bg-brand-50/40 dark:hover:bg-surface group relative block px-4 py-4 transition-colors sm:px-5 ${
             post.notice_yn ? "bg-brand-50/30 dark:bg-brand-50/40" : "bg-background"
           }`}
@@ -94,7 +101,10 @@ export function CommunityBoardList({
                 <Badge tone={post.notice_yn ? "warn" : "tag"} shape="tag" className="shrink-0">
                   {post.notice_yn ? "공지" : post.board_nm}
                 </Badge>
-                <h3 className="text-ink group-hover:text-brand-800 min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.01em] sm:text-base">
+                <h3
+                  aria-hidden="true"
+                  className="text-ink group-hover:text-brand-800 min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.01em] sm:text-base"
+                >
                   {post.title}
                 </h3>
               </div>

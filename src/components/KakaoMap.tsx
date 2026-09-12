@@ -64,7 +64,6 @@ interface Props {
   selectedId?: string | null;
   onSelect?: (id: string) => void;
   onDeselect?: () => void;
-  navTarget?: { lat: number; lng: number } | null;
   center?: { lat: number; lng: number };
   level?: number;
   myLocation?: { lat: number; lng: number } | null;
@@ -207,7 +206,6 @@ export default function KakaoMap({
   selectedId = null,
   onSelect,
   onDeselect,
-  navTarget = null,
   center = MAP_CENTER,
   level = MAP_LEVEL,
   myLocation = null,
@@ -226,7 +224,6 @@ export default function KakaoMap({
   const onDeselectRef = useRef(onDeselect);
   const overlaysRef = useRef<kakao.maps.CustomOverlay[]>([]);
   const markerElemsRef = useRef(new Map<string, HTMLDivElement>());
-  const polylineRef = useRef<kakao.maps.Polyline | null>(null);
   const pathPolylinesRef = useRef<kakao.maps.Polyline[]>([]);
   // 경로선 호버 시 커서 위치에 뜨는 라벨 — 한 번에 하나만 필요해서 배열이 아니라 단일 참조.
   const pathHoverOverlayRef = useRef<kakao.maps.CustomOverlay | null>(null);
@@ -393,30 +390,6 @@ export default function KakaoMap({
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, mapInitCount]);
-
-  // 경로 폴리라인 (내 위치를 확인 못한 상태면 그리지 않음)
-  useEffect(() => {
-    if (!mapRef.current || !window.kakao?.maps) return;
-    const K = window.kakao.maps;
-
-    polylineRef.current?.setMap(null);
-    polylineRef.current = null;
-
-    if (navTarget && myLocation) {
-      const line = new K.Polyline({
-        path: [
-          new K.LatLng(myLocation.lat, myLocation.lng),
-          new K.LatLng(navTarget.lat, navTarget.lng)
-        ],
-        strokeWeight: 4,
-        strokeColor: "#2563eb",
-        strokeOpacity: 0.85,
-        strokeStyle: "dash"
-      });
-      line.setMap(mapRef.current);
-      polylineRef.current = line;
-    }
-  }, [mapInitCount, myLocation, navTarget]);
 
   // 코스 경로선 — 구간(path)별로 순서대로 잇는다(코스 일정 장소 순서). 구간마다 색상·점선 여부가 다를 수 있다.
   // 각 구간의 지점이 2개 미만이면 그 구간은 그리지 않음.

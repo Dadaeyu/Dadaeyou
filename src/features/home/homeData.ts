@@ -7,13 +7,6 @@ export const HOME_NEED_OPTIONS = [
     group: "mobility"
   },
   {
-    id: "short_distance",
-    label: "가까운 곳부터",
-    description: "현재 위치에서 가까운 순서 우선",
-    storageValue: "긴 이동 피하기",
-    group: "mobility"
-  },
-  {
     id: "visual_guidance",
     label: "시각 지원",
     description: "점자·음성·보조견 지원 정보가 확인된 장소만 표시",
@@ -215,7 +208,6 @@ export interface HomePlace {
 }
 
 export interface RankedHomePlace extends HomePlace {
-  distanceMeters: number | null;
   matchedNeedIds: HomeNeedId[];
 }
 
@@ -223,11 +215,6 @@ export interface HomeDataResponse {
   places: RankedHomePlace[];
   festivals: RankedHomePlace[];
   source: string;
-}
-
-export interface HomeLocation {
-  lat: number;
-  lng: number;
 }
 
 export interface SelectHomePlaceOptions {
@@ -259,7 +246,6 @@ const LEGACY_NEED_MAP: Record<string, HomeNeedId[]> = {
 
 const EVIDENCE_KEYS_BY_NEED: Record<HomeNeedId, HomeAccessibilityKey[]> = {
   step_free: ["route", "exit"],
-  short_distance: [],
   visual_guidance: [
     "braile_block",
     "help_dog",
@@ -448,7 +434,6 @@ export function homeNeedIdsToChatNeeds(ids: readonly HomeNeedId[]): string[] {
   const values = new Set<string>();
   for (const id of ids) {
     if (id === "step_free") values.add("step_free");
-    if (id === "short_distance") values.add("short_distance");
     if (id === "visual_guidance") values.add("visual_impairment");
     if (id === "hearing_guidance") values.add("hearing_impairment");
     if (id === "easy_explanation") values.add("easy_explanation");
@@ -465,11 +450,10 @@ export function homeNeedIdsToChatNeeds(ids: readonly HomeNeedId[]): string[] {
 export function rankHomePlaces(
   places: readonly HomePlace[],
   needIds: readonly HomeNeedId[],
-  location: HomeLocation | null,
   query = ""
 ): RankedHomePlace[] {
   const normalizedQuery = normalizeSearchText(query);
-  const isDefaultDiscovery = !normalizedQuery && !needIds.length && !location;
+  const isDefaultDiscovery = !normalizedQuery && !needIds.length;
   const evidenceNeedIds = getStrictFilterNeedIds(needIds);
   const queryMatches = places.filter(
     (place) =>
@@ -487,12 +471,9 @@ export function rankHomePlaces(
         (item) => getHomeEvidenceStatus(item) === "available"
       );
       const matchedNeedIds = needIds.filter((needId) => {
-        if (needId === "short_distance") return false;
         if (needId === "easy_explanation") return false;
         return placeSatisfiesHomeNeed(place, needId);
       });
-      const distanceMeters =
-        location && hasCoordinates(place) ? distanceBetween(location, place) : null;
       const matchedEvidenceCount = availableEvidence.filter((item) =>
         needIds.some(
           (needId) =>
@@ -515,7 +496,6 @@ export function rankHomePlaces(
 
       return {
         place,
-        distanceMeters,
         matchedNeedIds,
         matchedEvidenceCount,
         availableEvidenceCount: availableEvidence.length,
@@ -525,10 +505,6 @@ export function rankHomePlaces(
       };
     })
     .sort((a, b) => {
-      if (needIds.includes("short_distance")) {
-        const distanceOrder = compareKnownDistances(a.distanceMeters, b.distanceMeters);
-        if (distanceOrder !== 0) return distanceOrder;
-      }
       if (b.queryMatchPriority !== a.queryMatchPriority) {
         return b.queryMatchPriority - a.queryMatchPriority;
       }
@@ -547,9 +523,8 @@ export function rankHomePlaces(
       if (b.completeness !== a.completeness) return b.completeness - a.completeness;
       return a.place.title.localeCompare(b.place.title, "ko");
     })
-    .map(({ place, distanceMeters, matchedNeedIds }) => ({
+    .map(({ place, matchedNeedIds }) => ({
       ...place,
-      distanceMeters,
       matchedNeedIds
     }));
 }
@@ -573,7 +548,7 @@ export function selectHomePlacesForDisplay(
   const eligiblePlaces = normalizedQuery
     ? evidenceMatchedPlaces
     : evidenceMatchedPlaces.filter((place) => !isPastEvent(place, now));
-  const shouldPreserveRanking = normalizedQuery || needIds.includes("short_distance");
+  const shouldPreserveRanking = Boolean(normalizedQuery);
   if (shouldPreserveRanking) return eligiblePlaces.slice(0, limit);
 
   const isDefaultDiscovery = !needIds.length;
@@ -638,7 +613,7 @@ export function placeSatisfiesHomeNeed(
   place: Pick<HomePlace, "accessibility">,
   needId: HomeNeedId
 ): boolean {
-  if (needId === "short_distance" || needId === "easy_explanation") return true;
+  if (needId === "easy_explanation") return true;
   if (needId === "step_free") {
     const accessEvidence = place.accessibility.filter((evidence) =>
       EVIDENCE_KEYS_BY_NEED.step_free.includes(evidence.key)
@@ -681,7 +656,7 @@ export function getConfirmedHomeEvidenceForNeeds(
 }
 
 function getStrictFilterNeedIds(needIds: readonly HomeNeedId[]) {
-  return needIds.filter((needId) => needId !== "short_distance" && needId !== "easy_explanation");
+  return needIds.filter((needId) => needId !== "easy_explanation");
 }
 
 function evidenceSatisfiesHomeNeed(
@@ -917,13 +892,6 @@ export function sortHomeEvidenceForNeeds(
   });
 }
 
-export function formatDistance(distanceMeters: number | null): string | null {
-  if (distanceMeters === null || !Number.isFinite(distanceMeters)) return null;
-  if (distanceMeters < 10) return "10m 이내";
-  if (distanceMeters < 1000) return `${Math.round(distanceMeters / 10) * 10}m`;
-  return `${(distanceMeters / 1000).toFixed(distanceMeters < 10_000 ? 1 : 0)}km`;
-}
-
 export function formatSourceDate(value: string | null): string | null {
   if (!value) return null;
   const digits = value.replace(/\D/g, "");
@@ -988,20 +956,6 @@ function getQueryMatchPriority(place: HomePlace, query: string) {
   if (title.includes(query)) return 3;
   if (place.category && normalizeSearchText(place.category).includes(query)) return 2;
   if (place.address && normalizeSearchText(place.address).includes(query)) return 1;
-  return 0;
-}
-
-function hasCoordinates(place: HomePlace): place is HomePlace & {
-  latitude: number;
-  longitude: number;
-} {
-  return Number.isFinite(place.latitude) && Number.isFinite(place.longitude);
-}
-
-function compareKnownDistances(a: number | null, b: number | null) {
-  if (a !== null && b !== null) return a - b;
-  if (a !== null) return -1;
-  if (b !== null) return 1;
   return 0;
 }
 
@@ -1121,16 +1075,4 @@ function getHomeEventDateSeed(value: string | null | undefined): number | null {
   if (!digits || digits.length !== 8) return null;
   const seed = Number(digits);
   return Number.isFinite(seed) && seed > 0 ? seed : null;
-}
-
-function distanceBetween(from: HomeLocation, to: { latitude: number; longitude: number }): number {
-  const earthRadius = 6_371_000;
-  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
-  const lat1 = toRadians(from.lat);
-  const lat2 = toRadians(to.latitude);
-  const deltaLat = toRadians(to.latitude - from.lat);
-  const deltaLng = toRadians(to.longitude - from.lng);
-  const a =
-    Math.sin(deltaLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
-  return Math.round(earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }

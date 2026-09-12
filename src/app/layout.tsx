@@ -3,7 +3,6 @@ import Script from "next/script";
 import "./globals.css";
 import RootShell from "@/components/RootShell";
 import { PwaRegistration } from "@/components/pwa/PwaRegistration";
-import { fetchPlacesFromDb } from "@/lib/supabase/places";
 import { A11Y_STORAGE_KEY } from "@/lib/accessibility";
 
 export const metadata: Metadata = {
@@ -45,13 +44,11 @@ const a11yInitScript = `
 })();
 `;
 
-export default async function RootLayout({
+export default function RootLayout({
   children
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const dbData = await fetchPlacesFromDb();
-
   return (
     <html lang="ko" suppressHydrationWarning>
       <body>
@@ -61,9 +58,7 @@ export default async function RootLayout({
           dangerouslySetInnerHTML={{ __html: a11yInitScript }}
         />
         <PwaRegistration />
-        <RootShell places={dbData?.places} placeDetails={dbData?.details} fromDb={!!dbData}>
-          {children}
-        </RootShell>
+        <RootShell>{children}</RootShell>
       </body>
     </html>
   );

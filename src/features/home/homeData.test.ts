@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   HOME_PRIMARY_NEED_IDS,
-  formatDistance,
   getAccessibilityGroups,
   getConfirmedHomeEvidenceForNeeds,
   getHomeEvidenceStatus,
@@ -54,10 +53,11 @@ test("기존 프로필 값을 홈 도움 조건으로 변환한다", () => {
     "계단 피하기",
     "쉬운 설명"
   ]);
-  assert.deepEqual(
-    homeNeedIdsToChatNeeds(["step_free", "short_distance", "hearing_guidance", "easy_explanation"]),
-    ["step_free", "short_distance", "hearing_impairment", "easy_explanation"]
-  );
+  assert.deepEqual(homeNeedIdsToChatNeeds(["step_free", "hearing_guidance", "easy_explanation"]), [
+    "step_free",
+    "hearing_impairment",
+    "easy_explanation"
+  ]);
   assert.deepEqual(
     homeNeedIdsToChatNeeds(["accessible_toilet", "stroller_friendly", "family_support"]),
     ["accessible_toilet", "stroller"]
@@ -72,7 +72,6 @@ test("추천 조건은 필요한 도움 1개와 추가 시설만 유지한다", 
   const selected = normalizeHomeNeedSelection([
     "step_free",
     "visual_guidance",
-    "short_distance",
     "public_transport_ready",
     "accessible_toilet",
     "parking_friendly",
@@ -107,10 +106,10 @@ test("같은 선택 그룹에서는 새 조건으로 교체하고 선택된 조�
 });
 
 test("화면에 없는 예전 추천 값은 숨은 조건으로 유지하지 않는다", () => {
+  assert.deepEqual(resolveHomeNeedIds(["긴 이동 피하기", "short_distance"]), []);
   assert.deepEqual(
     normalizeHomeNeedSelection([
       "guided_support",
-      "short_distance",
       "public_transport_ready",
       "parking_friendly",
       "easy_explanation",
@@ -150,7 +149,7 @@ test("구체적인 방문 도움은 해당 공개 정보가 있는 장소를 우
     "family_support",
     "guided_support"
   ] as const) {
-    const [first] = rankHomePlaces([unsupported, fullySupported], [needId], null);
+    const [first] = rankHomePlaces([unsupported, fullySupported], [needId]);
     assert.equal(first.id, "fully-supported");
     assert.deepEqual(first.matchedNeedIds, [needId]);
   }
@@ -174,7 +173,7 @@ test("버스 노선형 대중교통 설명도 실제 추천 근거로 사용한�
     accessibility: []
   };
 
-  const [first] = rankHomePlaces([unsupported, transitPlace], ["public_transport_ready"], null);
+  const [first] = rankHomePlaces([unsupported, transitPlace], ["public_transport_ready"]);
 
   assert.equal(first.id, "transit-place");
   assert.deepEqual(first.matchedNeedIds, ["public_transport_ready"]);
@@ -188,7 +187,7 @@ test("선택한 도움과 실제 접근성 근거가 있는 장소를 우선한�
     title: "야외 공간",
     accessibility: []
   };
-  const [first] = rankHomePlaces([withoutEvidence, basePlace], ["step_free"], null);
+  const [first] = rankHomePlaces([withoutEvidence, basePlace], ["step_free"]);
 
   assert.equal(first.id, "place-a");
   assert.deepEqual(first.matchedNeedIds, ["step_free"]);
@@ -205,7 +204,7 @@ test("필드가 있어도 이용 불가 안내는 추천 근거로 사용하지 
       { key: "restroom", label: "장애인 화장실", value: "장애인 화장실 없음" }
     ]
   };
-  const ranked = rankHomePlaces([unavailablePlace], ["step_free"], null);
+  const ranked = rankHomePlaces([unavailablePlace], ["step_free"]);
 
   assert.deepEqual(ranked, []);
   assert.equal(
@@ -231,7 +230,7 @@ test("선택한 추천 조건은 모두 만족해야 하며 관련 없는 장소
     ]
   };
 
-  const ranked = rankHomePlaces([toiletOnly, allMatched], ["step_free", "accessible_toilet"], null);
+  const ranked = rankHomePlaces([toiletOnly, allMatched], ["step_free", "accessible_toilet"]);
   const selected = selectHomePlacesForDisplay(ranked, {
     needIds: ["step_free", "accessible_toilet"],
     limit: 4
@@ -267,7 +266,7 @@ test("계단 피하기는 엘리베이터나 휠체어 대여만으로 추천하
   assert.equal(placeSatisfiesHomeNeed(elevatorOnly, "step_free"), false);
   assert.equal(placeSatisfiesHomeNeed(explicitRoute, "step_free"), true);
   assert.deepEqual(
-    rankHomePlaces([elevatorOnly, explicitRoute], ["step_free"], null).map((place) => place.id),
+    rankHomePlaces([elevatorOnly, explicitRoute], ["step_free"]).map((place) => place.id),
     ["explicit-route"]
   );
 });
@@ -286,7 +285,7 @@ test("계단 피하기는 계단·급경사·좁은 길 같은 주의 문구가 
   };
 
   assert.equal(placeSatisfiesHomeNeed(cautionPlace, "step_free"), false);
-  assert.deepEqual(rankHomePlaces([cautionPlace], ["step_free"], null), []);
+  assert.deepEqual(rankHomePlaces([cautionPlace], ["step_free"]), []);
 });
 
 test("안전한 출입구가 있어도 접근로에 흙·돌 구간이나 계단이 있으면 제외한다", () => {
@@ -330,8 +329,7 @@ test("대중교통 이동은 실제 노선·정류장 근거가 필요하고 긴
   assert.deepEqual(
     rankHomePlaces(
       [longWalkTransit, genericTransit, concreteTransit],
-      ["public_transport_ready"],
-      null
+      ["public_transport_ready"]
     ).map((place) => place.id),
     ["concrete-transit"]
   );
@@ -375,7 +373,7 @@ test("청각 안내는 시각장애인 녹음도서 같은 DB 이상값을 추�
 
   assert.equal(placeSatisfiesHomeNeed(anomaly, "hearing_guidance"), false);
   assert.deepEqual(
-    rankHomePlaces([anomaly, captioned], ["hearing_guidance"], null).map((place) => place.id),
+    rankHomePlaces([anomaly, captioned], ["hearing_guidance"]).map((place) => place.id),
     ["captioned"]
   );
 });
@@ -392,7 +390,7 @@ test("시각 안내는 점자·보조견·음성·큰글자·유도 안내 필�
   }));
 
   assert.deepEqual(
-    rankHomePlaces(visualEvidencePlaces, ["visual_guidance"], null).map((place) => place.id),
+    rankHomePlaces(visualEvidencePlaces, ["visual_guidance"]).map((place) => place.id),
     ["visual-0", "visual-1", "visual-2"]
   );
 });
@@ -414,7 +412,7 @@ test("유모차 동반은 유모차 근거와 무단차 동선을 함께 만족�
 
   assert.equal(placeSatisfiesHomeNeed(strollerOnly, "stroller_friendly"), false);
   assert.deepEqual(
-    rankHomePlaces([strollerOnly, strollerAndRoute], ["stroller_friendly"], null).map(
+    rankHomePlaces([strollerOnly, strollerAndRoute], ["stroller_friendly"]).map(
       (place) => place.id
     ),
     ["stroller-and-route"]
@@ -435,7 +433,7 @@ test("장애인 주차는 일반 주차 가능 문구가 아니라 전용·교�
 
   assert.equal(placeSatisfiesHomeNeed(genericParking, "parking_friendly"), false);
   assert.deepEqual(
-    rankHomePlaces([genericParking, accessibleParking], ["parking_friendly"], null).map(
+    rankHomePlaces([genericParking, accessibleParking], ["parking_friendly"]).map(
       (place) => place.id
     ),
     ["accessible-parking"]
@@ -542,9 +540,9 @@ test("접근성 정보는 이동·시각·청각·영유아 목적별로 묶는�
 });
 
 test("장소명뿐 아니라 활동과 편의시설 정보도 검색한다", () => {
-  assert.equal(rankHomePlaces([basePlace], [], null, "전시").length, 1);
-  assert.equal(rankHomePlaces([basePlace], [], null, "화장실").length, 1);
-  assert.equal(rankHomePlaces([basePlace], [], null, "수영").length, 0);
+  assert.equal(rankHomePlaces([basePlace], [], "전시").length, 1);
+  assert.equal(rankHomePlaces([basePlace], [], "화장실").length, 1);
+  assert.equal(rankHomePlaces([basePlace], [], "수영").length, 0);
 });
 
 test("정확한 장소명 검색에는 소개문에 이름만 언급된 주변 장소를 섞지 않는다", () => {
@@ -560,7 +558,7 @@ test("정확한 장소명 검색에는 소개문에 이름만 언급된 주변 �
     overview: "국립대전숲체원 인근에서 식사하기 좋은 곳"
   };
 
-  const ranked = rankHomePlaces([nearbyRestaurant, exactPlace], [], null, "국립대전숲체원");
+  const ranked = rankHomePlaces([nearbyRestaurant, exactPlace], [], "국립대전숲체원");
 
   assert.deepEqual(
     ranked.map((place) => place.id),
@@ -585,15 +583,9 @@ test("일반 검색에서는 제목에 맞는 장소를 소개문에만 언급�
     ]
   };
 
-  const ranked = rankHomePlaces([overviewMatch, titleMatch], [], null, "수목원");
+  const ranked = rankHomePlaces([overviewMatch, titleMatch], [], "수목원");
 
   assert.equal(ranked[0]?.id, "park");
-});
-
-test("실제 좌표가 있을 때만 거리를 계산한다", () => {
-  const [ranked] = rankHomePlaces([basePlace], ["short_distance"], { lat: 36.35, lng: 127.38 });
-
-  assert.equal(formatDistance(ranked.distanceMeters), "10m 이내");
 });
 
 test("조건 없는 기본 홈은 숙박보다 방문 목적지 후보를 먼저 보여준다", () => {
@@ -614,7 +606,7 @@ test("조건 없는 기본 홈은 숙박보다 방문 목적지 후보를 먼저
         : basePlace.accessibility
   }));
 
-  const ranked = rankHomePlaces(places, [], null);
+  const ranked = rankHomePlaces(places, []);
 
   assert.deepEqual(
     new Set(ranked.slice(0, 2).map((place) => place.category)),
@@ -635,8 +627,8 @@ test("조건 없는 기본 홈 순서는 날짜와 무관하게 안정적이다"
     imageUrl: `https://example.com/${id}.jpg`
   }));
 
-  const firstRanking = rankHomePlaces(places, [], null).map((place) => place.id);
-  const secondRanking = rankHomePlaces(places, [], null).map((place) => place.id);
+  const firstRanking = rankHomePlaces(places, []).map((place) => place.id);
+  const secondRanking = rankHomePlaces(places, []).map((place) => place.id);
 
   assert.deepEqual(firstRanking, secondRanking);
   assert.deepEqual(firstRanking, ["a", "b", "c"]);
@@ -684,7 +676,7 @@ test("같은 조건 매칭 수라면 입력 앞쪽의 비방문 카테고리보�
   );
 });
 
-test("검색어와 가까운순 추천은 정확도와 거리순을 그대로 유지한다", () => {
+test("검색어 추천은 정확도 순서를 그대로 유지한다", () => {
   const rankedPlaces = [
     rankedPlace("place-c", "문화시설", []),
     rankedPlace("place-a", "관광지", []),
@@ -695,14 +687,6 @@ test("검색어와 가까운순 추천은 정확도와 거리순을 그대로 �
     selectHomePlacesForDisplay(rankedPlaces, {
       needIds: [],
       query: "미술관",
-      limit: 3,
-      recommendationSeed: 99
-    }).map((place) => place.id),
-    ["place-c", "place-a", "place-b"]
-  );
-  assert.deepEqual(
-    selectHomePlacesForDisplay(rankedPlaces, {
-      needIds: ["short_distance"],
       limit: 3,
       recommendationSeed: 99
     }).map((place) => place.id),
@@ -880,31 +864,6 @@ test("홈 축제는 종료된 행사를 빼고 진행 중인 행사와 가까운
   );
 });
 
-test("긴 이동 피하기는 접근성 필드 수보다 실제 직선거리를 먼저 적용한다", () => {
-  const nearbyPlace: HomePlace = {
-    ...basePlace,
-    id: "place-nearby",
-    title: "가까운 장소",
-    latitude: 36.3501,
-    longitude: 127.3801,
-    accessibility: []
-  };
-  const fartherPlace: HomePlace = {
-    ...basePlace,
-    id: "place-farther",
-    title: "먼 장소",
-    latitude: 36.39,
-    longitude: 127.42
-  };
-  const ranked = rankHomePlaces([fartherPlace, nearbyPlace], ["short_distance"], {
-    lat: 36.35,
-    lng: 127.38
-  });
-
-  assert.equal(ranked[0].id, "place-nearby");
-  assert.deepEqual(ranked[0].matchedNeedIds, []);
-});
-
 test("긴 관광 운영시간을 홈에서 읽기 쉽게 요약한다", () => {
   assert.equal(
     summarizeVisitInfo({
@@ -931,7 +890,6 @@ function rankedPlace(
     id,
     title: id,
     category,
-    distanceMeters: null,
     matchedNeedIds
   };
 }
