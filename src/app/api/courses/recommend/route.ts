@@ -5,6 +5,7 @@ import { createTimeoutSignal } from "@/lib/server/timeout-signal";
 import { resolveChatClientKey } from "@/lib/chat/server/request-identity";
 import {
   reserveCourseRecommendUsage,
+  releaseCourseRecommendUsage,
   peekCourseRecommendUsage,
   CourseRecommendUsageError,
   COURSE_RECOMMEND_DAILY_LIMIT
@@ -85,8 +86,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const usage = await reserveCourseRecommendUsage(clientKey);
-
     const body = (await request.json().catch(() => ({}))) as {
       accessibility?: unknown;
       themes?: unknown;
@@ -150,11 +149,13 @@ export async function POST(request: Request) {
     const markedActivityCandidates = activityCandidates.map(markBakery);
     const markedRestaurantCandidates = restaurantCandidates.map(markBakery);
 
+    // 후보 부족·API 키 미설정은 AI를 아예 호출하지 않는 실패라, 하루 이용 횟수를 쓰기 전에
+    // 걸러낸다(먼저 차감하고 나중에 실패로 끝나 사용자가 결과 없이 횟수만 잃는 걸 막기 위해).
     if (markedActivityCandidates.length < MIN_CANDIDATES) {
       return NextResponse.json({
         courses: [],
         message: "조건에 맞는 장소가 너무 적어서 코스를 만들지 못했어요. 필터를 조금 넓혀보세요.",
-        usage
+        usage: await peekCourseRecommendUsage(clientKey)
       });
     }
 
@@ -166,6 +167,10 @@ export async function POST(request: Request) {
       );
     }
 
+    // 여기서부터는 실제 AI 호출이 일어나므로 이제 하루 이용 횟수를 차감한다. 이후 단계
+    // (LLM 호출 실패·빈 결과)에서 실패하면 반드시 releaseCourseRecommendUsage로 되돌려준다.
+    const usage = await reserveCourseRecommendUsage(clientKey);
+
     const model = getDeepSeekModel();
     const drafts = await requestCourseDrafts({
       apiKey,
@@ -175,6 +180,7 @@ export async function POST(request: Request) {
     });
 
     if (!drafts) {
+      await releaseCourseRecommendUsage(clientKey);
       return NextResponse.json(
         { error: "코스를 설계하지 못했어요. 잠시 뒤 다시 시도해 주세요." },
         { status: 502 }
@@ -190,10 +196,11 @@ export async function POST(request: Request) {
       .slice(0, MAX_COURSES);
 
     if (courses.length === 0) {
+      await releaseCourseRecommendUsage(clientKey);
       return NextResponse.json({
         courses: [],
         message: "조건에 맞는 코스를 만들지 못했어요. 필터를 조금 바꿔서 다시 시도해 보세요.",
-        usage
+        usage: await peekCourseRecommendUsage(clientKey)
       });
     }
 

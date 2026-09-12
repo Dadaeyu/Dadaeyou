@@ -81,6 +81,22 @@ export async function reserveCourseRecommendUsage(
 }
 
 /**
+ * reserveCourseRecommendUsage로 올린 카운트를 되돌린다(supabase/schema-course-recommend-usage-release.sql).
+ * 후보 장소는 충분해서 예약까지는 했지만 이후 LLM 호출/파싱이 실패해 결과를 못 만든 경우,
+ * 사용자가 아무 코스도 못 받고 하루 횟수만 소진하지 않도록 실패 시 반드시 호출해야 한다.
+ * 실패해도(예: RPC 자체 오류) 사용자 응답을 막을 정도는 아니라 조용히 무시한다.
+ */
+export async function releaseCourseRecommendUsage(clientKey: string): Promise<void> {
+  const clientPeriod = getClientPeriod();
+  const supabase = createAdminClient();
+  await supabase.rpc("release_course_recommend_usage", {
+    p_client_key: clientKey,
+    p_client_period: clientPeriod,
+    p_usage: 1
+  });
+}
+
+/**
  * reserveCourseRecommendUsage 와 달리 카운트를 올리지 않고 오늘 이미 쓴 횟수만 조회한다.
  * "AI 코스 추천받기" 배너를 처음 렌더링할 때부터(실제로 누르기 전에) 오늘 사용 현황을
  * 보여주기 위한 용도 — 아직 오늘 쓴 적이 없으면 행 자체가 없으므로 0회로 취급한다.
