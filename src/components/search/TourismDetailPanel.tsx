@@ -9,7 +9,6 @@ import {
   Navigation,
   ChevronLeft,
   MapPin,
-  Flag,
   MessageCircle,
   PenLine,
   Plus,
@@ -65,24 +64,14 @@ function decodeHtmlEntities(text: string): string {
 }
 
 // <br> 기준으로 줄바꿈하되, 원문에 섞인 공백/개행까지 살아남아 빈 줄이 생기지 않도록 각 줄을 trim한다.
-// formatUseTime()이 넣어주는 실제 개행문자(\n)도 <br>와 동일하게 줄바꿈으로 처리한다.
+// usetime/restdate의 실제 개행문자(\n)는 place 정규화 단계(syncEngine.ts의 formatUseTime/
+// formatRestDate)에서 이미 항목 경계에 넣어 저장해두므로, 여기서는 <br>와 동일하게 나눠주기만 한다.
 function renderWithLineBreaks(text: string) {
   const lines = text
     .split(/<br\s*\/?>|\n/gi)
     .map((l) => decodeHtmlEntities(l.trim()))
     .filter(Boolean);
   return lines.flatMap((line, i) => (i === 0 ? [line] : [<br key={i} />, line]));
-}
-
-// tb_place_detail_normalized.usetime 원문은 "-"로 문장이 뒤섞여 있어 그대로 보여주면 읽기 어렵다.
-// 항목 구분점(요일/휴게시간/※안내 등) 앞에 줄바꿈을 넣어 가독성을 맞춘다.
-function formatUseTime(text: string): string {
-  return text
-    .replace(/^\s*-\s*/, "")
-    .replace(/-\s*(?=[가-힣※\[])/g, "\n")
-    .replace(/※/g, "\n※")
-    .replace(/\)주말/g, ")\n주말")
-    .replace(/(\d{2}:\d{2})\[/g, "$1\n[");
 }
 
 // 지도·코스 검색 결과 상세 패널 — DB(tb_place) 출처와 카카오 로컬 검색 출처를 함께 다룬다.
@@ -129,7 +118,6 @@ export default function TourismDetailPanel({
   const isKakao = sp.source === "kakao";
   const [favorited, setFavorited] = useState(false);
   const [loginNotice, setLoginNotice] = useState(false);
-  const [showReport, setShowReport] = useState(false);
   const [overviewExpanded, setOverviewExpanded] = useState(false);
   const [reviewTotal, setReviewTotal] = useState(0);
   const [averageRating, setAverageRating] = useState<number | null>(null);
@@ -276,7 +264,7 @@ export default function TourismDetailPanel({
     : [
         { label: "주소", value: detail?.addr1 || "-" },
         ...(isEvent ? [{ label: "기간", value: eventPeriod || "-" }] : []),
-        { label: "시간", value: detail?.use_time ? formatUseTime(detail.use_time) : "-" },
+        { label: "시간", value: detail?.use_time || "-" },
         ...(isEvent ? [] : [{ label: "휴무일", value: detail?.rest_date || "-" }]),
         { label: "전화", value: detail?.phone || "-" }
       ];
@@ -620,42 +608,6 @@ export default function TourismDetailPanel({
               )}
             </div>
           )}
-
-          {/* 제보 */}
-          <div>
-            {showReport ? (
-              <div className="space-y-2 rounded-xl border border-gray-200 p-3">
-                <p className="text-xs font-semibold text-gray-700">정보 제보</p>
-                <textarea
-                  placeholder="잘못된 정보나 개선 사항을 알려주세요..."
-                  className="focus:ring-brand-500 w-full resize-none rounded-lg border border-gray-200 p-2 text-xs focus:ring-2 focus:outline-none"
-                  rows={3}
-                />
-                <div className="flex justify-end gap-2">
-                  <button
-                    onClick={() => setShowReport(false)}
-                    className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700"
-                  >
-                    취소
-                  </button>
-                  <button
-                    onClick={() => setShowReport(false)}
-                    className="bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 text-xs text-white transition-colors"
-                  >
-                    제출
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowReport(true)}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 py-3 text-sm text-gray-500 transition-colors hover:bg-gray-50"
-              >
-                <Flag className="h-4 w-4" />
-                정보 제보
-              </button>
-            )}
-          </div>
         </div>
       )}
     </div>

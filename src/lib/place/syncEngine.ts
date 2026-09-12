@@ -925,6 +925,49 @@ export function parseRestdate(text: string): {
   };
 }
 
+// usetime(시간) 원문은 "-"로 문장이 뒤섞여 있어 그대로 보여주면 읽기 어렵다. 항목 구분점(요일/
+// 휴게시간/※안내 등) 앞에 줄바꿈을 넣어 가독성을 맞춘다. 화면에 뿌릴 때가 아니라 정규화 단계에서
+// 미리 넣어둬야, 이 값을 쓰는 모든 화면이 별도 처리 없이 그대로 줄바꿈된 텍스트를 받는다.
+function formatUseTime(text: string): string {
+  return (
+    text
+      .replace(/<br\s*\/?>/gi, "\n")
+      // "[구간]" 라벨은 앞뒤 모두 새 줄로 — 앞의 구분자(공백/하이픈, 있으면)까지 흡수해서
+      // "-[숙박]"처럼 하이픈만 덩그러니 남는 걸 막는다.
+      .replace(/[\s-]*\[([^[\]]*)\]\s*/g, "\n[$1]\n")
+      // "17:00하절기"처럼 구분자 없이 시간과 계절 라벨이 바로 붙는 경우만 targeted 로 자른다.
+      // "21:30까지"처럼 시간 뒤에 자연스러운 조사가 붙는 경우와는 겹치지 않는다.
+      .replace(/(\d{2}:\d{2})(?=하절기|동절기)/g, "$1\n")
+      // "18:0010월~2월"처럼 구분자 하나 없이 시간과 다음 월 범위가 바로 붙는 경우도 그 경계에서 자른다.
+      .replace(/(\d{1,2}:\d{2})(?=\d{1,2}\s*월)/g, "$1\n")
+      // 하이픈 뒤(공백 있으면 그것까지 건너뛰고)가 숫자가 아니거나 "숫자+월"이면 새 항목으로 보고
+      // 줄바꿈한다. "10:30 - 21:00" 같은 시간 범위(하이픈 뒤가 그냥 숫자)는 그대로 둔다.
+      // (?=(\s*))\1 는 JS에 possessive quantifier가 없어 쓰는 우회(atomic group emulation) —
+      // \s*를 lookahead로 캡처해 그대로 소비시켜 뒤의 lookahead가 백트래킹으로 흔들리지 않게 한다.
+      .replace(/-(?=(\s*))\1(?=\D|\d+\s*월)/g, "\n")
+      .replace(/※/g, "\n※")
+      .replace(/\)주말/g, ")\n주말")
+      .replace(/\n-\s*/g, "\n") // 줄 맨 앞에 남는 불릿 하이픈 정리(예: "[숲체원]\n- 09:00" → "[숲체원]\n09:00")
+      .replace(/\n{2,}/g, "\n")
+      .trim()
+  );
+}
+
+// restdate(휴무일) 원문도 usetime과 같은 API에서 오며 "<br>"/"-"로 여러 항목이 이어붙어 있어
+// formatUseTime과 같은 방식으로 줄바꿈한다. "매주 월요일 / 법정공휴일"처럼 "/"로 구분된 항목은
+// 그대로 둔다(줄바꿈하지 않음) — 같은 줄에 나열되는 게 자연스러운 항목들이라고 판단.
+function formatRestDate(text: string): string {
+  return text
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/[\s-]*\[([^[\]]*)\]\s*/g, "\n[$1]\n")
+    .replace(/(\d{2}:\d{2})(?=하절기|동절기)/g, "$1\n")
+    .replace(/-(?=(\s*))\1(?=\D|\d+\s*월)/g, "\n")
+    .replace(/※/g, "\n※")
+    .replace(/\n-\s*/g, "\n")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+}
+
 async function syncDetailNormalized(
   supabase: SupabaseClient,
   deadline: number,
@@ -1042,11 +1085,20 @@ async function syncDetailNormalized(
       for (const v of variants) delete row[v];
     }
 
-    // 휴무일: 병합된 restdate 원본은 그대로 두고, 파생 컬럼 3개를 채운다.
+    // 휴무일: 파생 컬럼 3개는 줄바꿈 넣기 전의 원본 텍스트 기준으로 뽑는다.
     const rest = parseRestdate(typeof row.restdate === "string" ? row.restdate : "");
     row.closed_weekdays = rest.closedWeekdays; // smallint[] — number[] (또는 null) 그대로
     row.closed_holiday = rest.closedHoliday;
     row.has_irregular_closing = rest.hasIrregularClosing;
+
+    // 시간/휴무일: "-"로 뒤섞인 문장에 항목 경계 줄바꿈을 넣어 저장한다. 화면에서 매번 다시
+    // 가공하지 않도록 정규화 단계에서 한 번만 처리한다.
+    if (typeof row.usetime === "string" && row.usetime.trim() !== "") {
+      row.usetime = formatUseTime(row.usetime);
+    }
+    if (typeof row.restdate === "string" && row.restdate.trim() !== "") {
+      row.restdate = formatRestDate(row.restdate);
+    }
   }
 
   // place_id(PK) 기준으로 insert/update 분류해 tb_place_detail_normalized 로 upsert.
